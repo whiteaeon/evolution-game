@@ -1,5 +1,5 @@
 import type { GameController } from "../game/controller.js";
-import { TRAITS, type Individual } from "../sim/index.js";
+import { TRAITS, individualName, notableById, type Individual, type Notable } from "../sim/index.js";
 
 interface Node {
   ind: Individual;
@@ -69,6 +69,7 @@ export class FamilyTree {
 
   private focalId: number | null = null;
   private inspectId: number | null = null;
+  private notable: Map<number, Notable[]> = new Map();
   private mode: TreeMode = "ancestry";
   private nodes: Node[] = [];
   private panX = 0;
@@ -267,6 +268,7 @@ export class FamilyTree {
 
   render(): void {
     if (!this.visible) return;
+    this.notable = notableById(this.ctrl.sim.state.individuals);
     this.layout();
     this.syncPicker();
     const ctx = this.cx;
@@ -314,9 +316,13 @@ export class FamilyTree {
       if (founder) { ctx.strokeStyle = "#ffd166"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(s.x, s.y, r + 2.5, 0, Math.PI * 2); ctx.stroke(); }
       if (n.ind.lineage) { ctx.fillStyle = "#c9b3ff"; ctx.fillRect(s.x - 1.5, s.y - r - 5, 3, 3); }
       if (n.hasMore) { ctx.fillStyle = "#ffe08a"; ctx.fillText(this.mode === "descendants" ? "▼" : "▲", s.x - 3, s.y - r - 3); }
+      // notable individuals get a gold star above the node
+      const isNotable = this.notable.has(n.ind.id);
+      if (isNotable) { ctx.fillStyle = "#ffd166"; ctx.font = `${Math.round(10 * this.zoom)}px monospace`; ctx.fillText("★", s.x + r, s.y - r); }
       ctx.fillStyle = "#f3e6d2";
       ctx.font = `${Math.round(9 * this.zoom)}px monospace`;
-      ctx.fillText(`#${n.ind.id}`, s.x - 8, s.y + r + 9);
+      const label = individualName(n.ind).split(" ")[0];
+      ctx.fillText(label, s.x - ctx.measureText(label).width / 2, s.y + r + 9);
     }
 
     this.renderInspect();
@@ -334,7 +340,7 @@ export class FamilyTree {
     const opts = [...living]
       .sort((a, b) => b.generation - a.generation)
       .slice(0, 80)
-      .map((i) => `<option value="${i.id}">#${i.id} · gen ${i.generation}${i.lineage ? " · " + i.lineage : ""}</option>`)
+      .map((i) => `<option value="${i.id}">${this.notable.has(i.id) ? "★ " : ""}${individualName(i)} · #${i.id} · gen ${i.generation}</option>`)
       .join("");
     pick.innerHTML = opts;
     pick.value = String(this.focalId);
@@ -350,9 +356,14 @@ export class FamilyTree {
     const bars = TRAITS.map(
       (t) => `<div class="tr"><span>${t.slice(0, 4)}</span><i style="width:${Math.round(ind.genome[t] * 100)}%"></i></div>`,
     ).join("");
+    const notables = this.notable.get(ind.id) ?? [];
+    const badges = notables
+      .map((n) => `<span class="ins-notable" title="${n.detail}">★ ${n.title}</span>`)
+      .join(" ");
     box.innerHTML = `
-      <div class="ins-h">#${ind.id} · ${ind.sex === "f" ? "♀" : "♂"} · gen ${ind.generation}</div>
+      <div class="ins-h">${individualName(ind)} <span class="dim">#${ind.id}</span> · ${ind.sex === "f" ? "♀" : "♂"} · gen ${ind.generation}</div>
       <div class="ins-meta">${ind.alive ? `age ${ind.age}` : "deceased"}${ind.lineage ? ` · ${ind.lineage} blood` : ""}${ind.motherId === undefined ? " · founder" : ""}</div>
+      ${badges ? `<div class="ins-notables">${badges}</div>` : ""}
       <div class="ins-bars">${bars}</div>
       ${ind.motherId !== undefined ? `<div class="ins-par">parents: #${ind.motherId} ♀ · #${ind.fatherId} ♂</div>` : ""}`;
   }
