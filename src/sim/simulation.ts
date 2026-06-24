@@ -6,6 +6,7 @@ import {
   DEFAULT_REGION,
   regionById,
   regionDistance,
+  regionNeighbors,
   type BiomeProfile,
 } from "./regions.js";
 import {
@@ -108,6 +109,8 @@ export interface SimState {
   shelter: Shelter;
   region: string;
   biome: Biome;
+  /** Ids of regions the tribe has discovered. The rest stay under fog of war. */
+  discovered: string[];
   era: Era;
   generation: number;
   /** Win: the tribe has become modern humans. */
@@ -159,6 +162,7 @@ export class Simulation {
       shelter: "cave",
       region: region.id,
       biome: region.biome,
+      discovered: [region.id, ...regionNeighbors(region.id)],
       era: "Paleolithic",
       generation: 0,
       won: false,
@@ -248,6 +252,9 @@ export class Simulation {
     }
     s.region = target.id;
     s.biome = target.biome;
+    for (const id of [target.id, ...regionNeighbors(target.id)]) {
+      if (!s.discovered.includes(id)) s.discovered.push(id);
+    }
     this.logEvent("milestone", `The tribe migrates to ${target.name} (${target.biome})${deaths ? ` — ${deaths} lost on the journey` : ""}.`);
     return deaths;
   }
@@ -703,7 +710,12 @@ export class Simulation {
     sim.rng.setState(data.rng);
     sim.nextId = data.nextId;
     sim.allocation = data.allocation;
-    sim.state = { ...data.state, knowledge: Knowledge.deserialize(data.state.knowledge) };
+    sim.state = {
+      ...data.state,
+      knowledge: Knowledge.deserialize(data.state.knowledge),
+      // Saves from before fog-of-war lack this; fall back to the current region.
+      discovered: data.state.discovered ?? [data.state.region],
+    };
     return sim;
   }
 }

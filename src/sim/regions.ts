@@ -28,6 +28,20 @@ export function regionDistance(a: string, b: string): number {
   return Math.hypot(ra.x - rb.x, ra.y - rb.y);
 }
 
+/**
+ * Map distance within which two regions count as neighbours. Migrating to (or
+ * scouting) a region reveals it and everything inside this radius of it — the
+ * fog-of-war reveal range. Chosen so the world forms one connected graph.
+ */
+export const NEIGHBOR_RADIUS = 0.42;
+
+/** Region ids adjacent to `id` — close enough to glimpse from there. */
+export function regionNeighbors(id: string): string[] {
+  return REGIONS.filter((r) => r.id !== id && regionDistance(id, r.id) <= NEIGHBOR_RADIUS).map(
+    (r) => r.id,
+  );
+}
+
 /** Per-biome environment + the trait its survival pressures reward. */
 export interface BiomeProfile {
   coldAdd: number; // added to baseCold

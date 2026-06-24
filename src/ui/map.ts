@@ -74,16 +74,24 @@ export class MapView {
   render(): void {
     if (!this.visible) return;
     const cur = this.ctrl.sim.state.region;
+    const discovered = new Set(this.ctrl.sim.state.discovered);
     const svg = this.host.querySelector('[data-el="svg"]') as SVGElement;
 
-    // edges from the current region to all others
+    // edges from the current region to the discovered ones we could journey to
     let edges = "";
     const here = regionById(cur);
     for (const r of REGIONS) {
-      if (r.id === cur) continue;
+      if (r.id === cur || !discovered.has(r.id)) continue;
       edges += `<line x1="${here.x * 100}" y1="${here.y * 72}" x2="${r.x * 100}" y2="${r.y * 72}" class="mapedge"/>`;
     }
     const nodes = REGIONS.map((r) => {
+      if (!discovered.has(r.id)) {
+        // Fog of war: an unexplored region — no name, not selectable.
+        return `<g class="mapnode fog" transform="translate(${r.x * 100},${r.y * 72})">
+          <circle r="4.5" fill="#2a2f3a" />
+          <text y="-6">?</text>
+        </g>`;
+      }
       const cls = r.id === cur ? "here" : r.id === this.selected ? "sel" : "";
       return `<g data-region="${r.id}" class="mapnode ${cls}" transform="translate(${r.x * 100},${r.y * 72})">
         <circle r="4.5" fill="${BIOME_COLOR[r.biome]}" />

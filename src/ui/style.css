@@ -186,6 +186,10 @@ button.big { font-weight: 700; padding: 7px 14px; }
 .mapnode.here circle { stroke: #fff; stroke-width: 1.1; }
 .mapnode.sel circle { stroke: var(--accent); stroke-width: 1.1; }
 .mapnode:hover circle { r: 5.2; }
+.mapnode.fog { cursor: default; opacity: 0.55; }
+.mapnode.fog circle { stroke: #4a5a44; stroke-dasharray: 1 1; }
+.mapnode.fog text { fill: #8a93a0; font-weight: bold; }
+.mapnode.fog:hover circle { r: 4.5; }
 .map-info { font-size: 13px; color: var(--ink); line-height: 1.5; min-height: 48px; padding: 4px 2px; }
 
 /* ── family tree ── */
