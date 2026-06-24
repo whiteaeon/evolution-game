@@ -244,6 +244,7 @@ export class Simulation {
         ind.alive = false;
         s.totals.deaths++;
         deaths++;
+        this.invalidateLiving();
       }
     }
     s.region = target.id;
@@ -264,8 +265,24 @@ export class Simulation {
     }
   }
 
+  /**
+   * Cached snapshot of the living individuals, rebuilt lazily. The full
+   * individuals array grows with every birth and is filtered many times per
+   * tick, so we keep one filtered list and invalidate it whenever the living
+   * set changes (births, deaths, migration). Behaviour is identical to the old
+   * per-call filter: callers never mutate the returned array in place.
+   */
+  private livingCache: Individual[] | null = null;
+
+  private invalidateLiving(): void {
+    this.livingCache = null;
+  }
+
   get living(): Individual[] {
-    return this.state.individuals.filter((i) => i.alive);
+    if (this.livingCache === null) {
+      this.livingCache = this.state.individuals.filter((i) => i.alive);
+    }
+    return this.livingCache;
   }
 
   /** Look up any individual (living or dead) by id — for the family tree. */
@@ -442,6 +459,7 @@ export class Simulation {
       if (this.rng.chance(this.mortalityProb(ind, e))) {
         ind.alive = false;
         s.totals.deaths++;
+        this.invalidateLiving();
       }
     }
   }
@@ -498,6 +516,7 @@ export class Simulation {
       if (this.rng.chance(clamp01((1 - ind.genome[trait]) * lethality))) {
         ind.alive = false;
         s.totals.deaths++;
+        this.invalidateLiving();
       }
     }
   }
@@ -552,6 +571,7 @@ export class Simulation {
       const ind = this.makeIndividual(genome, s.generation, this.rng.int(16, 26));
       ind.lineage = enc.lineage;
       s.individuals.push(ind);
+      this.invalidateLiving();
       s.totals.births++;
     }
     s.totals.interbred++;
@@ -589,6 +609,7 @@ export class Simulation {
       );
       if (mother.lineage || father.lineage) child.lineage = mother.lineage ?? father.lineage;
       s.individuals.push(child);
+      this.invalidateLiving();
       s.resources.food -= BALANCE.birthFoodCost;
       s.totals.births++;
       pop++;
