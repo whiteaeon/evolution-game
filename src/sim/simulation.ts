@@ -68,6 +68,7 @@ const BALANCE = {
   encounterInterval: 28, // ticks between possible neighbouring-group encounters
   migrateFoodPerHead: 1.6, // food spent per person per unit distance travelled
   migrateRisk: 0.5, // base per-person death chance over a full-map journey
+  foodStoragePerCapacity: 9, // soft cap: max stored food = carryingCapacity * this (bounds hoarding)
 };
 
 interface ShelterDef {
@@ -301,6 +302,11 @@ export class Simulation {
     this.reproduce(effects);
     this.tryUpgradeShelter();
     this.updateEraAndGeneration();
+
+    // Soft storage cap: surplus food can't grow unbounded — it's bounded by the
+    // tribe's carrying capacity (shelter tier / biome / tech), keeping mid/late
+    // game tension. Clamped after every tick so observers always see it bounded.
+    s.resources.food = Math.min(s.resources.food, this.foodStorageCap(effects));
   }
 
   run(ticks: number): void {
@@ -602,6 +608,11 @@ export class Simulation {
       this.biome().capacity +
       e.capacityBonus
     );
+  }
+
+  /** Soft upper bound on stored food, scaled by the tribe's carrying capacity. */
+  foodStorageCap(e: Required<TechEffects>): number {
+    return this.carryingCapacity(e) * BALANCE.foodStoragePerCapacity;
   }
 
   private selectByFitness(pool: Individual[], e: Required<TechEffects>): Individual {

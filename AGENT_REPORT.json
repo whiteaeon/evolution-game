@@ -1,0 +1,9 @@
+{
+  "taskId": "balance-food-storage-cap",
+  "claim": "Added a soft food-storage cap (BALANCE.foodStoragePerCapacity = 9, cap = carryingCapacity * 9) clamped at the end of every tick in src/sim/simulation.ts; food now stays bounded (peaks ~1593 vs ~348k before) while the autopilot still reaches the Information Age at year 485.",
+  "filesChanged": ["src/sim/simulation.ts", "src/sim/food-cap.test.ts"],
+  "ranTests": true,
+  "ranBuild": true,
+  "ranSim": true,
+  "notes": "Cap scales with carrying capacity (shelter tier / biome / tech) via new BALANCE.foodStoragePerCapacity tunable and a foodStorageCap() helper. Clamp is the last step of tick() so any observer reading sim.state sees food bounded. Births were already gated on carryingCapacity, not on food surplus, so the cap removes hoarding without changing the win trajectory (year 485, births=711/deaths=546 identical to baseline). New test src/sim/food-cap.test.ts asserts food <= cap every tick over 600 ticks and that a million-food pile is clamped down. npm test (36 pass), npm run build, and npm run sim all pass. Change confined to src/sim."
+}
