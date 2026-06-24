@@ -71,6 +71,9 @@ export class GameController {
   resolveEncounter(accept: boolean): void {
     this.sim.resolveEncounter(accept);
   }
+  resolveChoice(option: number): void {
+    this.sim.resolveChoice(option);
+  }
 
   update(dtMs: number): void {
     if (this.ended) {
@@ -86,8 +89,8 @@ export class GameController {
       this.sim.tick();
       this.tickStamp++;
       if (this.ended) break;
-      // Auto-pause to surface an interbreeding decision to the player.
-      if (this.sim.state.pendingEncounter) {
+      // Auto-pause to surface a pending decision (encounter or event chain).
+      if (this.sim.state.pendingEncounter || this.sim.state.pendingChoice) {
         this.paused = true;
         break;
       }

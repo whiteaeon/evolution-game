@@ -136,6 +136,17 @@ export class UIOverlay {
         </div>
       </div>
 
+      <div class="modal hidden" data-el="choice">
+        <div class="modal-card">
+          <h3 data-el="choice-title"></h3>
+          <p data-el="choice-text"></p>
+          <div class="modal-actions">
+            <button data-act="choice-0" class="primary"></button>
+            <button data-act="choice-1"></button>
+          </div>
+        </div>
+      </div>
+
       <div class="modal hidden" data-el="endscreen">
         <div class="modal-card" data-el="end-card">
           <h3 data-el="end-title"></h3>
@@ -164,7 +175,8 @@ export class UIOverlay {
     for (const k of [
       "era", "year", "gen", "pop", "season", "goal", "eratrack", "resources", "legacy",
       "traits", "graph", "labor", "tasks", "lang", "techtree", "log",
-      "encounter", "encounter-text", "endscreen", "end-title", "end-body", "end-card", "tutorial",
+      "encounter", "encounter-text", "choice", "choice-title", "choice-text",
+      "endscreen", "end-title", "end-body", "end-card", "tutorial",
     ]) {
       this.el[k] = q(`[data-el="${k}"]`);
     }
@@ -219,6 +231,8 @@ export class UIOverlay {
       if (a === "family") this.tree.toggle();
       if (a === "interbreed-yes") { this.ctrl.resolveEncounter(true); this.ctrl.paused = false; }
       if (a === "interbreed-no") { this.ctrl.resolveEncounter(false); this.ctrl.paused = false; }
+      if (a === "choice-0") { this.ctrl.resolveChoice(0); this.ctrl.paused = false; }
+      if (a === "choice-1") { this.ctrl.resolveChoice(1); this.ctrl.paused = false; }
       if (a === "tutorial-ok") { this.el.tutorial.classList.add("hidden"); localStorage.setItem(TUTORIAL_KEY, "1"); }
     });
   }
@@ -304,6 +318,18 @@ export class UIOverlay {
       this.el["encounter-text"].textContent = s.pendingEncounter.message;
     } else {
       this.el.encounter.classList.add("hidden");
+    }
+
+    // choice-driven event-chain modal
+    if (s.pendingChoice) {
+      this.el.choice.classList.remove("hidden");
+      this.el["choice-title"].textContent = s.pendingChoice.title;
+      this.el["choice-text"].textContent = s.pendingChoice.message;
+      const [o0, o1] = s.pendingChoice.options;
+      (this.root.querySelector('[data-act="choice-0"]') as HTMLElement).textContent = `${o0.label} (${o0.hint})`;
+      (this.root.querySelector('[data-act="choice-1"]') as HTMLElement).textContent = `${o1.label} (${o1.hint})`;
+    } else {
+      this.el.choice.classList.add("hidden");
     }
 
     // milestone sound + end screen

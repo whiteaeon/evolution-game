@@ -204,7 +204,8 @@ export type SimEventType =
   | "raid"
   | "discovery"
   | "milestone"
-  | "encounter";
+  | "encounter"
+  | "choice";
 
 export interface SimEvent {
   type: SimEventType;
@@ -220,6 +221,31 @@ export interface Encounter {
   lineage: Lineage;
   /** Trait leanings this group contributes when you interbreed. */
   message: string;
+  /** Tick the offer expires if the player ignores it. */
+  expiresTick: number;
+}
+
+/** Branching, choice-driven event chains the player resolves with a trade-off. */
+export const EVENT_CHAINS = ["hardWinter", "sickCamp", "rivalCache"] as const;
+export type EventChainId = (typeof EVENT_CHAINS)[number];
+
+export interface ChoiceOption {
+  /** Button label. */
+  label: string;
+  /** Short trade-off hint shown to the player. */
+  hint: string;
+}
+
+/**
+ * A pending branching event. Mirrors {@link Encounter}: it sits on the state
+ * until the player (or autopilot) resolves it, or it expires. Option 0 is always
+ * the cautious choice; option 1 is the risky one.
+ */
+export interface PendingChoice {
+  id: EventChainId;
+  title: string;
+  message: string;
+  options: [ChoiceOption, ChoiceOption];
   /** Tick the offer expires if the player ignores it. */
   expiresTick: number;
 }
