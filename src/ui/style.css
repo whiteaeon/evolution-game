@@ -104,6 +104,8 @@ html, body {
 .controls { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .controls2 { display: flex; gap: 6px; margin-bottom: 8px; }
 .controls2 button { flex: 1; font-size: 12px; }
+.newrun { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; color: var(--dim, var(--ink)); }
+.newrun select { flex: 1; font: inherit; color: var(--ink); background: var(--panel2); border: 1px solid var(--line); border-radius: 7px; padding: 4px; }
 button {
   font: inherit; color: var(--ink); background: var(--panel2);
   border: 1px solid var(--line); border-radius: 7px; padding: 5px 9px; cursor: pointer;
