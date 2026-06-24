@@ -13,6 +13,7 @@ import {
 import { Audio } from "./audio.js";
 import { MapView } from "./map.js";
 import { FamilyTree } from "./familytree.js";
+import { keyboardShortcut } from "./shortcuts.js";
 
 const TRAIT_LABEL: Record<TraitName, string> = {
   strength: "Strength",
@@ -64,7 +65,37 @@ export class UIOverlay {
     document.body.append(mapHost, treeHost);
     this.map = new MapView(mapHost, ctrl);
     this.tree = new FamilyTree(treeHost, ctrl);
+    this.bindKeyboard();
     if (!localStorage.getItem(TUTORIAL_KEY)) this.el.tutorial.classList.remove("hidden");
+  }
+
+  /** Update the controller speed and reflect it in the speed-button highlight. */
+  private applySpeed(mult: number): void {
+    this.ctrl.setSpeed(mult);
+    this.root
+      .querySelectorAll("[data-speed]")
+      .forEach((b) =>
+        b.classList.toggle("on", Number((b as HTMLElement).dataset.speed) === mult),
+      );
+  }
+
+  /** Global keyboard shortcuts: Space pause, 1/2/4 speed, m map, f family. */
+  private bindKeyboard(): void {
+    window.addEventListener("keydown", (e) => {
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      const tag = (e.target as HTMLElement | null)?.tagName ?? "";
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+      const sc = keyboardShortcut(e.key);
+      if (!sc) return;
+      e.preventDefault();
+      this.audio.click();
+      switch (sc.kind) {
+        case "pause": this.ctrl.togglePause(); break;
+        case "speed": this.applySpeed(sc.mult); break;
+        case "map": this.map.toggle(); break;
+        case "family": this.tree.toggle(); break;
+      }
+    });
   }
 
   private build(): void {
@@ -88,17 +119,17 @@ export class UIOverlay {
 
       <div class="panel">
         <div class="controls">
-          <button data-act="pause" class="big">▶ Play</button>
+          <button data-act="pause" class="big" title="Pause / play (Space)">▶ Play</button>
           <div class="speeds">
-            <button data-speed="1" class="on">1×</button>
-            <button data-speed="2">2×</button>
-            <button data-speed="4">4×</button>
+            <button data-speed="1" class="on" title="Normal speed (1)">1×</button>
+            <button data-speed="2" title="Double speed (2)">2×</button>
+            <button data-speed="4" title="Quadruple speed (4)">4×</button>
           </div>
-          <button data-act="sound" title="Toggle sound">🔇</button>
+          <button data-act="sound" aria-label="Toggle sound" title="Toggle sound">🔇</button>
         </div>
         <div class="controls2">
-          <button data-act="map">🗺 Map</button>
-          <button data-act="family">🌳 Family</button>
+          <button data-act="map" title="World map (M)">🗺 Map</button>
+          <button data-act="family" title="Family tree (F)">🌳 Family</button>
           <button data-act="save">💾 Save</button>
           <button data-act="load">📂 Load</button>
           <button data-act="new">🔄 New</button>
@@ -225,11 +256,7 @@ export class UIOverlay {
       const a = btn.dataset.act;
       if (a !== "sound") this.audio.click();
       if (btn.dataset.act === "pause") this.ctrl.togglePause();
-      if (btn.dataset.speed) {
-        this.ctrl.setSpeed(Number(btn.dataset.speed));
-        this.root.querySelectorAll("[data-speed]").forEach((b) => b.classList.remove("on"));
-        btn.classList.add("on");
-      }
+      if (btn.dataset.speed) this.applySpeed(Number(btn.dataset.speed));
       if (btn.dataset.taskInc) this.ctrl.adjustTask(btn.dataset.taskInc as Task, +1);
       if (btn.dataset.taskDec) this.ctrl.adjustTask(btn.dataset.taskDec as Task, -1);
       if (a === "sound") btn.textContent = this.audio.toggle() ? "🔊" : "🔇";
