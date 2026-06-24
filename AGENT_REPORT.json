@@ -1,0 +1,9 @@
+{
+  "taskId": "perf-sprite-pooling",
+  "claim": "In MainScene.syncTribe, departed hominins now release their Phaser.Image into a spritePool (hidden) instead of being destroyed, and new hominins reuse a pooled image via acquireSprite (resetting texture/position/depth/visibility) before falling back to this.add.image, eliminating create/destroy churn while rendering the same MAX_SPRITES-capped set.",
+  "filesChanged": ["src/game/MainScene.ts"],
+  "ranTests": true,
+  "ranBuild": true,
+  "ranSim": false,
+  "notes": "Render-only change; no src/sim changes. Pool is bounded since at most MAX_SPRITES (40) hominins are shown, so active+pooled sprites never exceed 40. acquireSprite resets texture/position/depth/visibility on reuse; scale/flip/alpha are already set every frame for shown sprites. npm test (34 passed) and npm run build (tsc + vite) both pass. Sim unaffected, so npm run sim not run."
+}
