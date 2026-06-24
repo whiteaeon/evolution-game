@@ -10,6 +10,7 @@ import {
   type TechId,
   type TraitName,
 } from "../sim/index.js";
+import { ACHIEVEMENTS } from "../game/achievements.js";
 import { Audio } from "./audio.js";
 import { MapView } from "./map.js";
 import { FamilyTree } from "./familytree.js";
@@ -162,6 +163,11 @@ export class UIOverlay {
         <div class="techtree" data-el="techtree"></div>
       </div>
 
+      <div class="panel">
+        <h2>Achievements <span class="dim" data-el="ach-count"></span></h2>
+        <div class="badges" data-el="badges"></div>
+      </div>
+
       <div class="panel grow">
         <h2>Chronicle</h2>
         <div class="log" data-el="log"></div>
@@ -221,7 +227,7 @@ export class UIOverlay {
     const q = (sel: string) => this.root.querySelector(sel) as HTMLElement;
     for (const k of [
       "era", "year", "gen", "pop", "season", "goal", "goal-text", "eratrack", "resources", "legacy",
-      "traits", "graph", "labor", "tasks", "lang", "techtree", "log",
+      "traits", "graph", "labor", "tasks", "lang", "techtree", "badges", "ach-count", "log",
       "encounter", "encounter-text", "choice", "choice-title", "choice-text",
       "endscreen", "end-title", "end-body", "end-summary", "end-card", "tutorial",
     ]) {
@@ -357,6 +363,7 @@ export class UIOverlay {
       LANGUAGE_STEPS.map((w, i) => `<span class="${i <= lvl ? "on" : ""}">${w}</span>`).join(" › ");
 
     this.renderTechTree(s);
+    this.renderBadges();
     this.sampleAndDrawGraph(avg.count, avg.traits.intelligence);
 
     this.el.log.innerHTML = s.log
@@ -429,6 +436,23 @@ export class UIOverlay {
         })
         .join("");
       return `<div class="techera"><div class="techera-h">${era}</div>${rows}</div>`;
+    }).join("");
+  }
+
+  private lastUnlocked = -1;
+
+  /** Small badges panel: locked goals are visible (greyed); unlocked ones glow. */
+  private renderBadges(): void {
+    const unlocked = new Set(this.ctrl.unlocked);
+    if (unlocked.size === this.lastUnlocked) return; // only changes on a new unlock
+    this.lastUnlocked = unlocked.size;
+    this.el["ach-count"].textContent = `(${unlocked.size}/${ACHIEVEMENTS.length})`;
+    this.el.badges.innerHTML = ACHIEVEMENTS.map((a) => {
+      const got = unlocked.has(a.id);
+      return `<div class="badge ${got ? "got" : "locked"}" title="${a.description}">
+        <span class="badge-i">${got ? "🏅" : "🔒"}</span>
+        <span class="badge-t">${a.title}</span>
+      </div>`;
     }).join("");
   }
 

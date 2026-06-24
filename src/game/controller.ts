@@ -1,5 +1,6 @@
 import { Simulation, type Task } from "../sim/index.js";
 import { foldLegacy, loadLegacy, saveLegacy, type Legacy } from "./legacy.js";
+import { loadAchievements, mergeUnlocked, saveAchievements, type AchievementId } from "./achievements.js";
 
 const SAVE_KEY = "dawn-of-the-tribe-save";
 
@@ -14,6 +15,8 @@ export class GameController {
   speed = 1;
   readonly baseTicksPerSec = 0.9;
   legacy: Legacy;
+  /** Achievements unlocked across all runs (persisted, sticky). */
+  unlocked: AchievementId[];
   /** Set once a run has ended (won/extinct) and been folded into the legacy. */
   private recorded = false;
 
@@ -22,6 +25,7 @@ export class GameController {
 
   constructor() {
     this.legacy = loadLegacy();
+    this.unlocked = loadAchievements();
     this.startRun();
   }
 
@@ -76,6 +80,7 @@ export class GameController {
   }
 
   update(dtMs: number): void {
+    this.syncAchievements();
     if (this.ended) {
       this.recordEnd();
       return;
@@ -94,6 +99,15 @@ export class GameController {
         this.paused = true;
         break;
       }
+    }
+  }
+
+  /** Fold any newly-earned achievements into the sticky set and persist on change. */
+  private syncAchievements(): void {
+    const next = mergeUnlocked(this.unlocked, this.sim.state);
+    if (next.length !== this.unlocked.length) {
+      this.unlocked = next;
+      saveAchievements(next);
     }
   }
 
