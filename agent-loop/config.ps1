@@ -29,8 +29,8 @@ $Model            = 'claude-opus-4-8'
 $ClaudeCmd        = 'claude'
 # CAUTION: --dangerously-skip-permissions lets the headless agent edit/run without
 # prompts. Required for unattended turns; understand the risk before enabling the
-# scheduler. See README "Safety".
-$ClaudeExtraArgs  = @('--permission-mode', 'bypassPermissions')
+# scheduler. See README "Safety". (Verified present in Claude CLI 2.1.190.)
+$ClaudeExtraArgs  = @('--dangerously-skip-permissions')
 $BuilderTimeoutSec  = 1800
 $VerifierTimeoutSec = 1200
 
