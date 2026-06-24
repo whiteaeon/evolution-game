@@ -35,16 +35,26 @@ function Publish-PullRequest {
 
 # Merge an open PR (gh) and fast-forward local main, so the next turn branches off
 # the freshly-merged base (no conflict pile-up). Returns $true on success.
+# NOTE: gh pr merge can exit non-zero even when the merge SUCCEEDS (GitHub still
+# computing mergeability → "UNKNOWN", or --delete-branch hiccups). So we don't
+# trust the exit code — we poll the PR's actual state and only proceed on MERGED.
 function Merge-PullRequest {
     param([string]$Branch, [string]$Base)
     Push-Location $script:RepoRoot
     try {
-        gh pr merge $Branch --merge --delete-branch 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { Write-AgentLog "gh pr merge failed — PR left open for manual merge." 'WARN'; return $false }
+        $state = ''
+        for ($i = 0; $i -lt 8; $i++) {
+            $state = (gh pr view $Branch --json state -q .state 2>$null | Out-String).Trim()
+            if ($state -eq 'MERGED') { break }
+            gh pr merge $Branch --merge 2>&1 | Out-Null   # may report non-zero yet still merge
+            Start-Sleep -Seconds 4
+        }
+        $state = (gh pr view $Branch --json state -q .state 2>$null | Out-String).Trim()
+        if ($state -ne 'MERGED') { Write-AgentLog "PR for $Branch not merged after retries (state=$state) — left open." 'WARN'; return $false }
+        git push origin --delete $Branch 2>&1 | Out-Null   # best-effort remote cleanup
         git fetch origin $Base 2>&1 | Out-Null
         git checkout $Base 2>&1 | Out-Null
         git merge --ff-only "origin/$Base" 2>&1 | Out-Null
-        git branch -D $Branch 2>&1 | Out-Null
         Write-AgentLog "AUTO-MERGED $Branch into $Base (PR merged; local $Base fast-forwarded)." 'OK'
         return $true
     }
