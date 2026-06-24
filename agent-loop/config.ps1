@@ -1,7 +1,11 @@
 ﻿# config.ps1 — Agent-loop configuration. Dot-sourced by loop.ps1, the libs, and
 # the scheduler scripts. Edit values here; nothing else hard-codes paths.
 
-$ErrorActionPreference = 'Stop'
+# 'Continue' (not 'Stop'): under Windows PowerShell 5.1, native commands like git
+# that write to stderr (e.g. "branch not found") would otherwise become
+# terminating errors. Critical steps still fail loudly via explicit $LASTEXITCODE
+# checks and `throw`, and loop.ps1 wraps each turn in try/catch.
+$ErrorActionPreference = 'Continue'
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 $AgentRoot = $PSScriptRoot                       # ...\evolution-game\agent-loop

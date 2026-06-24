@@ -13,9 +13,10 @@ function New-AgentWorktree {
     if (-not (Test-Path $script:WorktreeBase)) { New-Item -ItemType Directory -Force -Path $script:WorktreeBase | Out-Null }
     if (Test-Path $path) { Remove-AgentWorktree -TaskId $TaskId }
 
-    # Start each task from a clean branch off the base.
-    git -C $script:RepoRoot branch -D $branch 2>$null | Out-Null
-    git -C $script:RepoRoot worktree add -b $branch $path $BaseBranch 2>&1 | Out-Null
+    # Start each task from a clean branch off the base (delete a stale one first).
+    git -C $script:RepoRoot show-ref --verify --quiet "refs/heads/$branch"
+    if ($LASTEXITCODE -eq 0) { git -C $script:RepoRoot branch -D $branch | Out-Null }
+    git -C $script:RepoRoot worktree add -b $branch $path $BaseBranch | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "git worktree add failed for $branch at $path"
     }
