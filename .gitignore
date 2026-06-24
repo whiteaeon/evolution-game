@@ -14,3 +14,6 @@ agent-loop/state/loop.lock
 # os / editor
 Thumbs.db
 .DS_Store
+
+# builder's per-turn report (read from disk by the loop; never needs committing)
+AGENT_REPORT.json
