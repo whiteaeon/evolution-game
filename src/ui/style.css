@@ -255,5 +255,7 @@ button.big { font-weight: 700; padding: 7px 14px; }
 .ins-bars .tr span { color: var(--ink-dim); font-size: 10px; }
 .ins-bars .tr i { display: block; height: 7px; background: linear-gradient(90deg, var(--accent2), var(--accent)); border-radius: 4px; }
 .ins-par { margin-top: 6px; color: var(--ink-dim); font-size: 11px; }
+.ins-notables { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 6px; }
+.ins-notable { background: rgba(255, 209, 102, 0.15); color: #ffd166; border: 1px solid rgba(255, 209, 102, 0.4); border-radius: 4px; padding: 1px 5px; font-size: 10px; }
 .tree-legend { font-size: 10px; color: var(--ink-dim); display: flex; flex-wrap: wrap; gap: 8px; }
 .lg-f { color: #e08fb0; } .lg-m { color: #7fb0e0; } .lg-founder { color: #ffd166; } .lg-lin { color: #c9b3ff; }
