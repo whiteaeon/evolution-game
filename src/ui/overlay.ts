@@ -17,6 +17,7 @@ import { ACHIEVEMENTS } from "../game/achievements.js";
 import { Audio } from "./audio.js";
 import { MapView } from "./map.js";
 import { FamilyTree } from "./familytree.js";
+import { TechGraph } from "./techgraph.js";
 import { keyboardShortcut } from "./shortcuts.js";
 import { eraSpans, traitDeltas, summaryHTML, type EraEntry } from "./summary.js";
 
@@ -64,6 +65,7 @@ export class UIOverlay {
   private graphCtx: CanvasRenderingContext2D | null = null;
   private map: MapView;
   private tree: FamilyTree;
+  private techGraph: TechGraph;
 
   constructor(root: HTMLElement, ctrl: GameController) {
     this.root = root;
@@ -72,9 +74,11 @@ export class UIOverlay {
     // Full-screen overlays live outside the side panel so they cover the world.
     const mapHost = document.createElement("div");
     const treeHost = document.createElement("div");
-    document.body.append(mapHost, treeHost);
+    const graphHost = document.createElement("div");
+    document.body.append(mapHost, treeHost, graphHost);
     this.map = new MapView(mapHost, ctrl);
     this.tree = new FamilyTree(treeHost, ctrl);
+    this.techGraph = new TechGraph(graphHost, ctrl);
     this.bindKeyboard();
     if (!localStorage.getItem(TUTORIAL_KEY)) this.el.tutorial.classList.remove("hidden");
   }
@@ -104,6 +108,7 @@ export class UIOverlay {
         case "speed": this.applySpeed(sc.mult); break;
         case "map": this.map.toggle(); break;
         case "family": this.tree.toggle(); break;
+        case "tech": this.techGraph.toggle(); break;
       }
     });
   }
@@ -140,6 +145,7 @@ export class UIOverlay {
         <div class="controls2">
           <button data-act="map" title="World map (M)">🗺 Map</button>
           <button data-act="family" title="Family tree (F)">🌳 Family</button>
+          <button data-act="techgraph" title="Tech graph (T)">🔬 Tech</button>
           <button data-act="save">💾 Save</button>
           <button data-act="load">📂 Load</button>
           <button data-act="new">🔄 New</button>
@@ -293,6 +299,7 @@ export class UIOverlay {
       if (a === "new") this.ctrl.newGame();
       if (a === "map") this.map.toggle();
       if (a === "family") this.tree.toggle();
+      if (a === "techgraph") this.techGraph.toggle();
       if (a === "interbreed-yes") { this.ctrl.resolveEncounter(true); this.ctrl.paused = false; }
       if (a === "interbreed-no") { this.ctrl.resolveEncounter(false); this.ctrl.paused = false; }
       if (a === "choice-0") { this.ctrl.resolveChoice(0); this.ctrl.paused = false; }
@@ -352,6 +359,7 @@ export class UIOverlay {
 
     if (this.map.visible) this.map.render();
     if (this.tree.visible) this.tree.render();
+    if (this.techGraph.visible) this.techGraph.render();
 
     this.el.legacy.innerHTML = this.ctrl.legacy.runs
       ? `Legacy: run #${this.ctrl.legacy.runs + 1} · best ${ERAS[this.ctrl.legacy.bestEraIndex]}`
