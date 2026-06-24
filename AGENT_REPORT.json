@@ -1,0 +1,9 @@
+{
+  "taskId": "perf-living-cache",
+  "claim": "Memoized Simulation.living with a lazily-rebuilt cache invalidated only on births, deaths, and migration, so the full individuals array is filtered at most once between membership changes instead of on every call; RNG call order is untouched, all 34 tests pass, build passes, and the headless sim still reaches the Information Age (year 485).",
+  "filesChanged": ["src/sim/simulation.ts"],
+  "ranTests": true,
+  "ranBuild": true,
+  "ranSim": true,
+  "notes": "The living getter previously re-filtered state.individuals (which grows with every birth) on each access; it is read 7+ times per tick (distributeWorkers, produce path, consumeAndUpdateNeeds, ageAndDie, maybeEncounter, reproduce, updateEraAndGeneration) plus from renderer/UI. Now a private livingCache is built lazily and nulled via invalidateLiving() at exactly the points the living set changes: the three alive=false sites (migrate, ageAndDie, applyHazard) and the two birth pushes (reproduce, resolveEncounter). Behavior is identical because (a) the cache is rebuilt with the same filter the next time it is read, so every call site still sees the current living set, and (b) no caller mutates the returned array in place (verified across src/: all external uses are length/iterate/filter/map/spread). No RNG draw was added, removed, or reordered, so determinism is exact. load() starts from a fresh instance (cache=null) so deserialized runs rebuild correctly. Change confined to src/sim/simulation.ts; no Phaser/DOM imports added."
+}
