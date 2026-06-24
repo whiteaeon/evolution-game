@@ -193,6 +193,24 @@ button.big { font-weight: 700; padding: 7px 14px; }
 
 .dim2 { color: var(--ink-dim); font-size: 11px; }
 
+/* end-of-run summary */
+.end-summary { text-align: left; margin-top: 14px; font-size: 12px; }
+.end-summary:empty { display: none; }
+.end-summary h4 { margin: 12px 0 4px; color: var(--accent); font-size: 12px; font-weight: 700; }
+.sum-stats { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--ink-dim); }
+.sum-stats b { color: var(--ink); }
+.sum-era { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+.se-name { flex: 0 0 88px; color: var(--ink); }
+.se-bar { flex: 1; height: 6px; background: #1d150e; border-radius: 3px; overflow: hidden; }
+.se-bar i { display: block; height: 100%; background: var(--accent); }
+.se-yrs { flex: 0 0 48px; text-align: right; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.sum-trait { display: flex; justify-content: space-between; gap: 8px; margin: 2px 0; color: var(--ink-dim); }
+.st-name { color: var(--ink); }
+.st-val { font-variant-numeric: tabular-nums; }
+.st-val b.up { color: var(--good); }
+.st-val b.down { color: var(--bad); }
+.st-val b.flat { color: var(--ink-dim); }
+
 /* ── region map ── */
 .map-card { max-width: 680px; width: 90vw; }
 .map-wrap { background: #1f2a22; border: 1px solid var(--line); border-radius: 10px; padding: 6px; margin: 8px 0; }
