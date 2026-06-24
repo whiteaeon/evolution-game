@@ -1,4 +1,4 @@
-# lib/verify.ps1 — VERIFY move. The gate has two halves that must AGREE:
+﻿# lib/verify.ps1 — VERIFY move. The gate has two halves that must AGREE:
 #   (A) Deterministic objective checks the harness runs itself — npm test/build,
 #       the headless sim still reaching the final era in range, and a static scan
 #       of the diff for sim/render-split violations and gutted assertions.

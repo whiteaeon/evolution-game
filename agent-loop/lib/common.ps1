@@ -1,4 +1,4 @@
-# lib/common.ps1 — shared helpers: logging, deps, git, JSON ledger, game checks,
+﻿# lib/common.ps1 — shared helpers: logging, deps, git, JSON ledger, game checks,
 # and the headless-Claude invocation (with a mock for dry-runs).
 
 function Write-AgentLog {

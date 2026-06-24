@@ -1,4 +1,4 @@
-<#
+﻿<#
   loop.ps1 — the orchestrator. One invocation = ONE turn made of five moves:
     DISCOVER → HANDOFF (worktree) → BUILD (builder Claude) → VERIFY (verifier
     Claude, fresh+adversarial) → PERSIST (ledger + artifacts + branch).

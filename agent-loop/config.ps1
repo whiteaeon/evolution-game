@@ -1,4 +1,4 @@
-# config.ps1 — Agent-loop configuration. Dot-sourced by loop.ps1, the libs, and
+﻿# config.ps1 — Agent-loop configuration. Dot-sourced by loop.ps1, the libs, and
 # the scheduler scripts. Edit values here; nothing else hard-codes paths.
 
 $ErrorActionPreference = 'Stop'

@@ -1,4 +1,4 @@
-# lib/discover.ps1 — DISCOVER move. Find the single most worthwhile task for this
+﻿# lib/discover.ps1 — DISCOVER move. Find the single most worthwhile task for this
 # turn. Sources, in priority order:
 #   1. Failing `npm test` / `npm run build` (typecheck)  → high-priority fix task
 #   2. Curated, prioritized backlog (state/tasks/backlog.json)

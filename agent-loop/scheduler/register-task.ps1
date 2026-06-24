@@ -1,4 +1,4 @@
-<#
+﻿<#
   register-task.ps1 — register the recurring agent loop with Windows Task
   Scheduler. **Created DISABLED by default** so it does not start firing
   unattended Claude turns. Enable it explicitly when you're ready:

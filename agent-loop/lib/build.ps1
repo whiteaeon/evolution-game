@@ -1,4 +1,4 @@
-# lib/build.ps1 — BUILD move. A headless "builder" Claude (latest model, fresh
+﻿# lib/build.ps1 — BUILD move. A headless "builder" Claude (latest model, fresh
 # process) makes the SMALLEST change that solves the task, runs the checks,
 # commits (but does NOT push), and writes AGENT_REPORT.json with a one-line claim.
 # In -Mock mode a stand-in builder proves the wiring without calling Claude.

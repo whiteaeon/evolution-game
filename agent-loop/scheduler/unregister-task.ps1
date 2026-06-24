@@ -1,4 +1,4 @@
-<#
+﻿<#
   unregister-task.ps1 — remove the scheduled agent loop entirely.
   Usage: powershell -ExecutionPolicy Bypass -File unregister-task.ps1
 #>

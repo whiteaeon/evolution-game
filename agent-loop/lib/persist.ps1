@@ -1,4 +1,4 @@
-# lib/persist.ps1 — PERSIST move. Everything the turn produced is written to disk
+﻿# lib/persist.ps1 — PERSIST move. Everything the turn produced is written to disk
 # so a context flush loses nothing: the append-only ledger (the loop's memory),
 # a per-turn artifact dir (diff, reports, logs, verdict), and the branch handling.
 # Approved work lands on its agent/<task> branch and STOPS there unless AutoMerge

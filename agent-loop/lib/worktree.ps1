@@ -1,4 +1,4 @@
-# lib/worktree.ps1 — HANDOFF move. Each task gets its own git worktree on an
+﻿# lib/worktree.ps1 — HANDOFF move. Each task gets its own git worktree on an
 # `agent/<task>` branch: a real, isolated checkout that shares the repo's single
 # .git (so it's cheap and parallel-safe), with node_modules junctioned in so the
 # builder/verifier can run `npm test/build/sim` without a fresh install.
