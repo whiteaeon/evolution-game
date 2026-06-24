@@ -14,6 +14,7 @@ import { Audio } from "./audio.js";
 import { MapView } from "./map.js";
 import { FamilyTree } from "./familytree.js";
 import { keyboardShortcut } from "./shortcuts.js";
+import { eraSpans, traitDeltas, summaryHTML, type EraEntry } from "./summary.js";
 
 const TRAIT_LABEL: Record<TraitName, string> = {
   strength: "Strength",
@@ -46,6 +47,11 @@ export class UIOverlay {
   private el: Record<string, HTMLElement> = {};
   private popHistory: number[] = [];
   private intHistory: number[] = [];
+  /** End-screen history, tracked across renders from sim state. */
+  private eraLog: EraEntry[] = [];
+  private startTraits: Record<TraitName, number> | null = null;
+  private peakPop = 0;
+  private trackedSim: GameController["sim"] | null = null;
   private lastSample = -1;
   private lastTechCount = -1;
   private lastEra = "";
@@ -187,6 +193,7 @@ export class UIOverlay {
         <div class="modal-card" data-el="end-card">
           <h3 data-el="end-title"></h3>
           <p data-el="end-body"></p>
+          <div class="end-summary" data-el="end-summary"></div>
           <div class="modal-actions">
             <button data-act="new" class="primary">Begin a new lineage</button>
           </div>
@@ -216,7 +223,7 @@ export class UIOverlay {
       "era", "year", "gen", "pop", "season", "goal", "goal-text", "eratrack", "resources", "legacy",
       "traits", "graph", "labor", "tasks", "lang", "techtree", "log",
       "encounter", "encounter-text", "choice", "choice-title", "choice-text",
-      "endscreen", "end-title", "end-body", "end-card", "tutorial",
+      "endscreen", "end-title", "end-body", "end-summary", "end-card", "tutorial",
     ]) {
       this.el[k] = q(`[data-el="${k}"]`);
     }
@@ -287,6 +294,7 @@ export class UIOverlay {
     const sim = this.ctrl.sim;
     const s = sim.state;
     const avg = sim.traitAverages();
+    this.trackEndStats(s, avg);
 
     this.el.era.textContent = s.era;
     this.el.era.dataset.era = s.era;
@@ -453,6 +461,24 @@ export class UIOverlay {
     line(this.intHistory, 1, "#7fd0ff");
   }
 
+  /**
+   * Accumulate the per-run history the end screen draws from: era timeline,
+   * starting trait averages, and peak population. Resets when a new run begins
+   * (the controller swaps in a fresh Simulation). Pure reads of sim state.
+   */
+  private trackEndStats(s: GameController["sim"]["state"], avg: { count: number; traits: Record<TraitName, number> }): void {
+    if (this.trackedSim !== this.ctrl.sim) {
+      this.trackedSim = this.ctrl.sim;
+      this.eraLog = [];
+      this.startTraits = null;
+      this.peakPop = 0;
+    }
+    if (!this.startTraits) this.startTraits = { ...avg.traits };
+    if (avg.count > this.peakPop) this.peakPop = avg.count;
+    const last = this.eraLog[this.eraLog.length - 1];
+    if (!last || last.era !== s.era) this.eraLog.push({ era: s.era, startTick: s.tick });
+  }
+
   private renderEndScreen(s: GameController["sim"]["state"], pop: number): void {
     const ended = s.won || pop === 0;
     if (!ended) {
@@ -465,7 +491,7 @@ export class UIOverlay {
     if (s.won) {
       card.classList.add("win");
       this.el["end-title"].textContent = "🛰️ You reached the Information Age!";
-      this.el["end-body"].innerHTML = `From a handful of stone-age hominins to a connected civilization in <b>${s.tick} years</b> and <b>${s.generation} generations</b>.<br>Births ${s.totals.births} · Deaths ${s.totals.deaths} · Interbred ${s.totals.interbred}.`;
+      this.el["end-body"].innerHTML = `From a handful of stone-age hominins to a connected civilization in <b>${s.tick} years</b> and <b>${s.generation} generations</b>.`;
       this.audio.chime();
     } else {
       card.classList.add("dead");
@@ -473,6 +499,26 @@ export class UIOverlay {
       this.el["end-body"].innerHTML = `Your tribe reached the <b>${s.era}</b> before the cold and the wild outlasted them, at year ${s.tick}.<br>Their legacy strengthens the next.`;
       this.audio.knell();
     }
+    this.el["end-summary"].innerHTML = this.buildSummary(s);
+  }
+
+  /** Assemble the end-of-run summary HTML from the tracked per-run history. */
+  private buildSummary(s: GameController["sim"]["state"]): string {
+    const final = this.ctrl.sim.traitAverages().traits;
+    let eldest: { age: number; generation: number } | null = null;
+    for (const ind of s.individuals) {
+      if (!eldest || ind.age > eldest.age) eldest = { age: ind.age, generation: ind.generation };
+    }
+    return summaryHTML(
+      {
+        eras: eraSpans(this.eraLog, s.tick),
+        traits: traitDeltas(this.startTraits ?? final, final),
+        peakPop: this.peakPop,
+        totals: s.totals,
+        eldest,
+      },
+      (t) => TRAIT_LABEL[t],
+    );
   }
 }
 
