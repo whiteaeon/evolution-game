@@ -1,0 +1,15 @@
+{
+  "taskId": "map-deeper-exploration",
+  "claim": "Added serialize-safe fog-of-war discovery: SimState.discovered (string[]) starts with the homeland plus its neighbours, migrate() reveals the destination and its neighbours, it round-trips through serialize/load (with a fallback for pre-fog saves), and map.ts renders undiscovered regions as anonymous unselectable '?' nodes.",
+  "filesChanged": [
+    "src/sim/regions.ts",
+    "src/sim/simulation.ts",
+    "src/ui/map.ts",
+    "src/ui/style.css",
+    "src/sim/exploration.test.ts"
+  ],
+  "ranTests": true,
+  "ranBuild": true,
+  "ranSim": true,
+  "notes": "New regions.ts helpers: NEIGHBOR_RADIUS (0.42) + regionNeighbors(); the resulting adjacency graph is verified connected so the whole world stays reachable by migrating. Discovery is purely informational state — it gates nothing in the sim — so balance is unchanged; npm run sim still reaches the Information Age at year 485. New src/sim/exploration.test.ts covers initial fog, reveal-on-migrate, neighbour/connectivity invariants, a save/load round-trip, and the pre-fog save fallback. The sim remains pure (no Phaser/DOM); map.ts only reads sim.state.discovered. All 39 tests and the build pass."
+}
