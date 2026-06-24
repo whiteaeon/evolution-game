@@ -79,5 +79,26 @@ function Get-NextTask {
         Write-AgentLog 'Discovery: GitHub remote present but gh discovery is a stub — skipping.' 'WARN'
     }
 
+    # 5) self-replenish — keep the loop running with one open-ended small improvement
+    #    (each gets a unique id so it's never "already done"; verifier still gates it).
+    if ($script:SelfImprove) {
+        $themes = @(
+            'Raise unit-test coverage of one currently-untested branch or edge case in src/sim — add tests, and fix any real bug they expose.',
+            'Improve one small UX or accessibility detail in the DOM UI (src/ui) without touching the sim.',
+            'Make one small, determinism-preserving performance improvement in the sim or render layer.',
+            'Improve one piece of in-game clarity: a label, tooltip, the chronicle, or tutorial copy.',
+            'Tighten one rough edge: pull a magic number into the BALANCE block, de-duplicate a little code, or sharpen a type.'
+        )
+        $theme = $themes[[Math]::Abs([int](Get-Date).Minute) % $themes.Count]
+        Write-AgentLog 'Discovery: backlog + TODOs empty — emitting a self-improvement task.'
+        return [ordered]@{
+            id          = 'self-improve-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
+            priority    = 9; type = 'self-improve'; source = 'self-improve'
+            title       = 'Autonomous improvement: ' + ($theme.Split('—')[0].Trim().TrimEnd('.'))
+            description = "$theme`n`nMake the SMALLEST change that delivers one concrete, genuine improvement. Preserve the pure-sim / render split (no Phaser/DOM in src/sim). Add or extend tests for any behaviour change. Do NOT weaken existing tests or break the sim reaching the Information Age."
+            verify      = 'npm test + build pass; sim still reaches the Information Age in range; no weakened/deleted tests; sim/render split intact; the change is small and genuinely useful.'
+        }
+    }
+
     return $null
 }

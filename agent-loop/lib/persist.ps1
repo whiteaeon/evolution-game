@@ -17,16 +17,36 @@ function Publish-PullRequest {
 
         $reason = ([string]$Verdict.reason)
         if ($reason.Length -gt 600) { $reason = $reason.Substring(0, 600) + '…' }
+        $tail = if ($script:AutoMerge) { "Auto-merged after passing the verifier + objective checks." }
+                else { "Produced + verified automatically; please review before merging." }
         $body = "Autonomous **agent-loop** change for task ``$($Task.id)``.`n`n" +
                 "**Claim:** $Claim`n`n" +
                 "**Verifier (approved, fresh/diff-only):** $reason`n`n" +
                 "Objective checks: test=$($Verdict.checks.test) build=$($Verdict.checks.build) sim=$($Verdict.checks.sim) (Information Age year $($Verdict.checks.simYear)). " +
-                "Produced + verified automatically; please review before merging."
+                $tail
         $out = gh pr create --base $base --head $Worktree.Branch --title $Task.title --body $body 2>&1 | Out-String
         $url = ($out | Select-String -Pattern 'https?://\S+/pull/\d+' | Select-Object -First 1).Matches.Value
         if ($url) { Write-AgentLog "APPROVED — opened PR: $url" 'OK'; return [string]$url }
         Write-AgentLog "Branch pushed but PR not parsed (already open?). gh: $($out.Trim())" 'WARN'
         return ''
+    }
+    finally { Pop-Location }
+}
+
+# Merge an open PR (gh) and fast-forward local main, so the next turn branches off
+# the freshly-merged base (no conflict pile-up). Returns $true on success.
+function Merge-PullRequest {
+    param([string]$Branch, [string]$Base)
+    Push-Location $script:RepoRoot
+    try {
+        gh pr merge $Branch --merge --delete-branch 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { Write-AgentLog "gh pr merge failed — PR left open for manual merge." 'WARN'; return $false }
+        git fetch origin $Base 2>&1 | Out-Null
+        git checkout $Base 2>&1 | Out-Null
+        git merge --ff-only "origin/$Base" 2>&1 | Out-Null
+        git branch -D $Branch 2>&1 | Out-Null
+        Write-AgentLog "AUTO-MERGED $Branch into $Base (PR merged; local $Base fast-forwarded)." 'OK'
+        return $true
     }
     finally { Pop-Location }
 }
@@ -46,17 +66,22 @@ function Save-TurnResult {
 
     $merged = $false
     $prUrl = ''
+    $base = if ($script:PrBase) { $script:PrBase } else { Get-MainBranch }
     if ($Verdict.approved) {
-        if ($script:AutoMerge) {
-            $main = Get-MainBranch
-            Write-AgentLog "AutoMerge ON: merging $($Worktree.Branch) into $main…"
+        $canPush = (-not $Mock) -and $script:PushPR -and (git -C $script:RepoRoot remote)
+        if ($canPush) {
+            # open a PR (audit trail / portfolio); auto-merge it if configured
+            $prUrl = Publish-PullRequest -Worktree $Worktree -Task $Task -Verdict $Verdict -Claim ([string]$BuildResult.report.claim)
+            if ($script:AutoMerge -and $prUrl) {
+                $merged = Merge-PullRequest -Branch $Worktree.Branch -Base $base
+            }
+        }
+        elseif ($script:AutoMerge -and -not $Mock) {
+            # no remote / push disabled → land it with a local merge
             git -C $script:RepoRoot merge --no-ff $Worktree.Branch -m "agent: merge $($Task.id)" 2>&1 | Out-Null
             $merged = ($LASTEXITCODE -eq 0)
-            if (-not $merged) { Write-AgentLog 'AutoMerge FAILED (conflict?) — branch kept for manual merge.' 'WARN'; git -C $script:RepoRoot merge --abort 2>$null | Out-Null }
-            else { Write-AgentLog "Merged into $main." 'OK' }
-        }
-        elseif ($script:PushPR -and -not $Mock -and (git -C $script:RepoRoot remote)) {
-            $prUrl = Publish-PullRequest -Worktree $Worktree -Task $Task -Verdict $Verdict -Claim ([string]$BuildResult.report.claim)
+            if (-not $merged) { Write-AgentLog 'AutoMerge (local) FAILED (conflict?) — branch kept.' 'WARN'; git -C $script:RepoRoot merge --abort 2>$null | Out-Null }
+            else { Write-AgentLog "AUTO-MERGED (local) $($Worktree.Branch) into $base." 'OK' }
         }
         else {
             Write-AgentLog "APPROVED — kept on branch $($Worktree.Branch) for your review (no push)." 'OK'

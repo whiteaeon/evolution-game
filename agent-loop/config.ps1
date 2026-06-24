@@ -34,16 +34,18 @@ $ClaudeExtraArgs  = @('--dangerously-skip-permissions')
 $BuilderTimeoutSec  = 1800
 $VerifierTimeoutSec = 1200
 
-# ── Safety / merge model ──────────────────────────────────────────────────────
-# OFF by default: approved work lands on an `agent/<task>` branch and STOPS there.
-# You review and merge. Flip to $true only if you want approved turns auto-merged
-# into the main branch.
-$AutoMerge  = $false
+# ── Merge model ───────────────────────────────────────────────────────────────
+# AutoMerge ON: an approved turn opens a PR and immediately merges it (gh pr merge),
+# then fast-forwards local main — so the loop is fully self-driving and each turn
+# branches off the freshly-merged main (no conflict pile-up). The ONLY gate is then
+# the adversarial verifier + objective checks (tests/build/sim, no weakened tests,
+# no sim/render-split break). Set $false to leave approved work as open PRs for you
+# to review/merge by hand.
+$AutoMerge  = $true
 $MainBranch = ''   # auto-detected (main/master) when empty
 
-# Propose approved work as a GitHub PR (push agent/<task> + `gh pr create`) instead
-# of leaving it on a local branch. Still human-gated — a PR is reviewed/merged by
-# you, never auto-merged. Requires a git remote + an authed `gh` CLI.
+# Propose approved work as a GitHub PR (push agent/<task> + `gh pr create`).
+# Requires a git remote + an authed `gh` CLI. (AutoMerge implies this.)
 $PushPR     = $true
 $PrBase     = ''   # PR base branch; auto = the repo's main branch when empty
 
@@ -62,6 +64,10 @@ $SimMaxYear      = 2000    # …or balance is considered broken → auto-reject.
 # ── Discovery ─────────────────────────────────────────────────────────────────
 $EnableGhDiscovery = $false   # auto-skipped anyway when there's no GitHub remote
 $TodoScanGlobs     = @('src/**/*.ts')
+# Self-replenish: when the curated backlog AND the TODO scan are both empty, emit
+# an open-ended "find one small, well-tested improvement" task so the loop keeps
+# running instead of idling. Every such turn is still fully verifier-gated.
+$SelfImprove       = $true
 
 # ── Misc ──────────────────────────────────────────────────────────────────────
 $KeepResultsTurns = 200       # prune oldest artifact dirs beyond this many

@@ -86,5 +86,61 @@
     "title": "Pool tribe sprites instead of create/destroy churn",
     "description": "MainScene currently destroys/creates hominin sprites as individuals come and go. Introduce a small object pool to reuse Phaser images, reducing GC churn at large populations. Render-only; behavior unchanged.",
     "verify": "npm build passes; game still renders the capped sprite set correctly; no src/sim changes; AGENT_REPORT notes the pooling approach."
+  },
+  {
+    "id": "endgame-summary-screen",
+    "priority": 12,
+    "type": "feature",
+    "title": "Victory/extinction summary screen with charts",
+    "description": "On win or extinction, show a richer summary: the era timeline (years per era), final vs starting trait averages, peak population, births/deaths/interbreds, and the longest-lived lineage. Render from sim state + the existing history the UI already samples. Pure UI; the sim exposes data, the overlay draws it.",
+    "verify": "npm test/build pass; a summary appears on win and on extinction with at least the era timeline and trait deltas; no src/sim behavior change; no console errors."
+  },
+  {
+    "id": "achievements",
+    "priority": 13,
+    "type": "content",
+    "title": "Add a small achievements system",
+    "description": "Track ~8 achievements (e.g. reach each era, interbreed with all three lineages, survive a run staying in the tundra, hit a population milestone, win without migrating). Compute them from sim state, persist unlocked ones to localStorage, and surface a small badges panel. Keep detection in a pure helper; UI just displays.",
+    "verify": "Unit tests cover the achievement-detection helper deterministically; npm test/build pass; unlocked achievements persist across reloads; no sim/render-split violation."
+  },
+  {
+    "id": "difficulty-modes",
+    "priority": 14,
+    "type": "feature",
+    "title": "Difficulty presets (gentle / standard / harsh)",
+    "description": "Add selectable difficulty presets that scale a few existing BALANCE/config knobs (event lethality, abundance, starting food/pop). Wire a selector on the new-run flow; thread the choice through GameController into SimConfig. The sim stays pure (it just receives config); presets live in one small data table.",
+    "verify": "New test asserts each preset produces a valid, completable config (autopilot still reaches the Information Age on standard); npm test/build pass; preset selectable in the UI; sim untouched except reading config."
+  },
+  {
+    "id": "weather-biome-particles",
+    "priority": 15,
+    "type": "art",
+    "title": "Biome-aware weather/ambience particles",
+    "description": "Extend MainScene's existing weather overlay with light, biome-appropriate ambience: dust in the desert, drifting leaves in the forest, sea-spray/birds on the coast, heat-shimmer tint, etc. Cheap, capped particle counts; render-only; respects the day/night + cold overlays already present.",
+    "verify": "npm build passes; particles vary by biome and stay performant (capped counts); no src/sim changes; framebuffer still renders."
+  },
+  {
+    "id": "notable-individuals",
+    "priority": 16,
+    "type": "feature",
+    "title": "Name and surface notable individuals",
+    "description": "Give individuals procedural names and let the Chronicle/family tree highlight 'notable' ones (longest-lived, most descendants, highest in a trait, first of a lineage). Names + notability are derived from existing lineage/genome data in a pure helper; the UI displays them.",
+    "verify": "Unit tests cover the naming + notability helpers; npm test/build pass; names appear in the family tree/inspector; no sim/render-split violation."
+  },
+  {
+    "id": "tech-tree-graph-view",
+    "priority": 17,
+    "type": "feature",
+    "title": "Visual tech-tree graph (prereq edges)",
+    "description": "Upgrade the tech panel (or add a modal) that draws the tech tree as a graph with prerequisite edges and era columns, showing known/available/locked state and research progress. Reads TECH_TREE; pan/zoom optional. Pure UI on top of existing knowledge data.",
+    "verify": "npm test/build pass; the graph shows prereq edges and per-tech state correctly; clicking an available tech still sets the research target; no src/sim changes."
+  },
+  {
+    "id": "perf-large-population",
+    "priority": 18,
+    "type": "perf",
+    "title": "Keep late-game smooth at large populations",
+    "description": "Profile the per-tick cost as population and the retained-individuals array grow into the thousands over a long run, and cut the worst offenders (allocations in hot loops, repeated full scans) without changing behaviour. Determinism must be exactly preserved.",
+    "verify": "All tests pass byte-identically (same seed -> same winning year); npm build passes; AGENT_REPORT shows a measured reduction in per-tick work or allocations; change confined to hot paths."
   }
 ]
