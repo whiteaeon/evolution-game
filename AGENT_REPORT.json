@@ -1,9 +1,0 @@
-{
-  "taskId": "family-tree-descendants-view",
-  "claim": "Added an ancestry/descendants toggle and an id-search box to the family-tree view in src/ui/familytree.ts, driven entirely off existing motherId/fatherId lineage data via a new pure descendantTree() helper, with no changes under src/sim/; npm test and npm run build both pass.",
-  "filesChanged": ["src/ui/familytree.ts", "src/ui/style.css", "src/ui/familytree.test.ts"],
-  "ranTests": true,
-  "ranBuild": true,
-  "ranSim": false,
-  "notes": "descendantTree() is a pure function over the individuals array (no DOM/Phaser) and is covered by src/ui/familytree.test.ts (3 tests: unknown-id null, descendant containment with pedigree-collapse dedupe, and depth-limit/truncation). The 'View' button toggles mode (ancestors above / descendants below); the 'Find #' input jumps focus to an individual by id (invalid ids flagged with a red border). Edge direction and the layout anchor are mode-aware. No simulation/balance code touched, so npm run sim was not run."
-}
