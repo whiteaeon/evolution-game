@@ -54,6 +54,7 @@ export class MainScene extends Phaser.Scene {
   private snowLayer!: Phaser.GameObjects.Container;
 
   private tribe = new Map<number, TribeView>();
+  private spritePool: Phaser.GameObjects.Image[] = [];
   private foodPool: Phaser.GameObjects.Image[] = [];
 
   private currentBiome: Biome | null = null;
@@ -244,7 +245,7 @@ export class MainScene extends Phaser.Scene {
         const rad = 22 + (idx % 6) * 12;
         const anchorX = Phaser.Math.Clamp(CAMP.x + Math.cos(a) * rad, 30, WORLD_W - 30);
         const anchorY = Phaser.Math.Clamp(CAMP.y + 26 + Math.sin(a) * rad * 0.6, 60, WORLD_H - 20);
-        const sprite = this.add.image(anchorX, anchorY, key).setDepth(anchorY);
+        const sprite = this.acquireSprite(anchorX, anchorY, key);
         view = { sprite, anchorX, anchorY, tx: anchorX, ty: anchorY, morph: key };
         this.tribe.set(ind.id, view);
       }
@@ -269,10 +270,26 @@ export class MainScene extends Phaser.Scene {
 
     for (const [id, view] of this.tribe) {
       if (!seen.has(id)) {
-        view.sprite.destroy();
+        this.releaseSprite(view.sprite);
         this.tribe.delete(id);
       }
     }
+  }
+
+  /** Reuse a pooled hominin image (or create one) instead of churning create/destroy. */
+  private acquireSprite(x: number, y: number, key: string): Phaser.GameObjects.Image {
+    const sprite = this.spritePool.pop();
+    if (sprite) {
+      sprite.setTexture(key).setPosition(x, y).setDepth(y).setVisible(true);
+      return sprite;
+    }
+    return this.add.image(x, y, key).setDepth(y);
+  }
+
+  /** Return a hominin image to the pool (hidden) rather than destroying it. */
+  private releaseSprite(sprite: Phaser.GameObjects.Image): void {
+    sprite.setVisible(false);
+    this.spritePool.push(sprite);
   }
 
   private syncWeather(cold: number, dt: number): void {
