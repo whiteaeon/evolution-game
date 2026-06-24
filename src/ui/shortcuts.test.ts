@@ -20,6 +20,11 @@ describe("keyboardShortcut", () => {
     expect(keyboardShortcut("F")).toEqual({ kind: "family" });
   });
 
+  it("maps t (any case) to the tech graph", () => {
+    expect(keyboardShortcut("t")).toEqual({ kind: "tech" });
+    expect(keyboardShortcut("T")).toEqual({ kind: "tech" });
+  });
+
   it("ignores unmapped keys (incl. speeds the game does not offer)", () => {
     expect(keyboardShortcut("3")).toBeNull();
     expect(keyboardShortcut("a")).toBeNull();

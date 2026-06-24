@@ -243,6 +243,26 @@ button.big { font-weight: 700; padding: 7px 14px; }
 .tree-body { display: flex; gap: 10px; margin: 8px 0; }
 .treecanvas { background: #221912; border: 1px solid var(--line); border-radius: 10px; cursor: grab; flex: 0 0 auto; }
 .treecanvas:active { cursor: grabbing; }
+
+/* ── tech graph ── */
+.graph-card { max-width: 1000px; width: 96vw; }
+.graph-body { display: flex; gap: 10px; margin: 8px 0; }
+.graphcanvas { background: #221912; border: 1px solid var(--line); border-radius: 10px; cursor: grab; flex: 0 0 auto; }
+.graphcanvas:active { cursor: grabbing; }
+.graph-side { flex: 1; display: flex; flex-direction: column; gap: 10px; text-align: left; min-width: 0; }
+.graph-inspect { background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; font-size: 13px; min-height: 120px; }
+.gi-h { color: var(--accent); font-weight: 700; }
+.gi-meta { color: var(--ink-dim); font-size: 12px; margin: 2px 0 6px; text-transform: capitalize; }
+.gi-prog { color: var(--accent); font-size: 12px; margin-bottom: 6px; }
+.gi-pre { font-size: 12px; line-height: 1.7; margin-bottom: 6px; }
+.gi-pre .pq-ok { color: var(--good); }
+.gi-pre .pq-no { color: var(--ink-dim); }
+.gi-blurb { color: var(--ink-dim); font-size: 12px; line-height: 1.4; }
+.graph-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--ink-dim); }
+.graph-legend .lg-known { color: var(--good); }
+.graph-legend .lg-open { color: var(--ink); }
+.graph-legend .lg-locked { color: #6f5e48; }
+.graph-legend .lg-target { color: var(--accent); }
 .tree-side { flex: 1 1 auto; min-width: 180px; display: flex; flex-direction: column; gap: 8px; }
 .tree-pick { display: flex; gap: 6px; align-items: center; font-size: 12px; flex-wrap: wrap; }
 .tree-pick select { background: var(--panel2); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 3px; max-width: 150px; }
