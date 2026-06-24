@@ -41,6 +41,16 @@ $VerifierTimeoutSec = 1200
 $AutoMerge  = $false
 $MainBranch = ''   # auto-detected (main/master) when empty
 
+# Propose approved work as a GitHub PR (push agent/<task> + `gh pr create`) instead
+# of leaving it on a local branch. Still human-gated — a PR is reviewed/merged by
+# you, never auto-merged. Requires a git remote + an authed `gh` CLI.
+$PushPR     = $true
+$PrBase     = ''   # PR base branch; auto = the repo's main branch when empty
+
+# Continuous-mode pacing (loop.ps1 -Continuous)
+$InterTurnSec = 10   # short gap after a real turn before starting the next
+$IdleMinutes  = 30   # back off this long when there's no task, or after an error
+
 # ── Objective game checks (the deterministic half of the gate) ────────────────
 # The verifier step ALWAYS runs these in the worktree regardless of what the
 # Claude verifier says; both must agree to approve.

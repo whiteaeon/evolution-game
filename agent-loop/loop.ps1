@@ -76,14 +76,33 @@ New-Item -ItemType Directory -Force -Path $ResultsDir | Out-Null
 Write-AgentLog "Repo: $RepoRoot | Model: $Model | AutoMerge: $AutoMerge | Mock: $Mock"
 
 if ($Continuous) {
-    $i = 0
-    while ($MaxTurns -le 0 -or $i -lt $MaxTurns) {
-        Invoke-AgentTurn -Mock:$Mock
-        $i++
-        if ($MaxTurns -gt 0 -and $i -ge $MaxTurns) { break }
-        Write-AgentLog "Sleeping $IntervalMinutes min until next turn…"
-        Start-Sleep -Seconds ($IntervalMinutes * 60)
+    # Single-instance guard: a stale lock (dead PID) is ignored; a live one wins.
+    $lock = Join-Path $StateDir 'loop.lock'
+    $old = if (Test-Path $lock) { (Get-Content $lock -ErrorAction SilentlyContinue | Select-Object -First 1) } else { '' }
+    if ($old -match '^\d+$' -and (Get-Process -Id ([int]$old) -ErrorAction SilentlyContinue)) {
+        Write-AgentLog "Another continuous loop (PID $old) is already running — exiting." 'WARN'
+        return
     }
+    "$PID" | Out-File -FilePath $lock -Encoding ascii
+    Write-AgentLog "Continuous mode (PID $PID): turn -> ${InterTurnSec}s gap; idle ${IdleMinutes}m when no work. Stop with Disable-ScheduledTask or kill this PID."
+    try {
+        $i = 0
+        while ($MaxTurns -le 0 -or $i -lt $MaxTurns) {
+            $entry = $null
+            try { $entry = Invoke-AgentTurn -Mock:$Mock }
+            catch { Write-AgentLog "Turn crashed: $($_.Exception.Message)" 'ERROR' }
+            $i++
+            if ($MaxTurns -gt 0 -and $i -ge $MaxTurns) { break }
+            if ($null -ne $entry) {
+                Start-Sleep -Seconds $InterTurnSec                 # did a turn → next one promptly
+            }
+            else {
+                Write-AgentLog "No task (or a turn errored) — idling $IdleMinutes min."
+                Start-Sleep -Seconds ($IdleMinutes * 60)           # backlog empty / error → back off
+            }
+        }
+    }
+    finally { Remove-Item $lock -ErrorAction SilentlyContinue }
 }
 else {
     Invoke-AgentTurn -Mock:$Mock
