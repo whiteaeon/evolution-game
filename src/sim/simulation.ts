@@ -157,8 +157,16 @@ export interface SimState {
   researchTarget: TechId | null;
   pendingEncounter: Encounter | null;
   pendingChoice: PendingChoice | null;
-  /** Lifetime tallies for the chronicle / stats screens. */
-  totals: { births: number; deaths: number; interbred: number };
+  /** Lifetime tallies for the chronicle / stats / achievement screens. */
+  totals: {
+    births: number;
+    deaths: number;
+    interbred: number;
+    /** Times the tribe has migrated to a new region this run. */
+    migrations: number;
+    /** Largest living population reached this run. */
+    peakPopulation: number;
+  };
   /** A short, human-readable description of the next objective. */
   goal: string;
 }
@@ -208,7 +216,7 @@ export class Simulation {
       researchTarget: knowledge.available()[0] ?? null,
       pendingEncounter: null,
       pendingChoice: null,
-      totals: { births: 0, deaths: 0, interbred: 0 },
+      totals: { births: 0, deaths: 0, interbred: 0, migrations: 0, peakPopulation: individuals.length },
       goal: "",
     };
   }
@@ -291,6 +299,7 @@ export class Simulation {
     }
     s.region = target.id;
     s.biome = target.biome;
+    s.totals.migrations++;
     this.logEvent("milestone", `The tribe migrates to ${target.name} (${target.biome})${deaths ? ` — ${deaths} lost on the journey` : ""}.`);
     return deaths;
   }
@@ -361,6 +370,7 @@ export class Simulation {
     this.reproduce(effects);
     this.tryUpgradeShelter();
     this.updateEraAndGeneration();
+    s.totals.peakPopulation = Math.max(s.totals.peakPopulation, this.living.length);
 
     // Soft storage cap: surplus food can't grow unbounded — it's bounded by the
     // tribe's carrying capacity (shelter tier / biome / tech), keeping mid/late

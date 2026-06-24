@@ -124,6 +124,18 @@ button.big { font-weight: 700; padding: 7px 14px; }
 .resources .cooking { color: var(--accent); font-weight: 700; }
 .legacy { margin-top: 6px; font-size: 11px; color: var(--blue); }
 
+.badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.badge {
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 8px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--panel2);
+  font-size: 11px; color: var(--ink-dim);
+}
+.badge.got { color: var(--ink); border-color: var(--accent); background: #4a3722; }
+.badge.locked { opacity: 0.55; }
+.badge-i { font-size: 12px; }
+.badge.got .badge-t { font-weight: 600; }
+
 /* traits + graph */
 .traits { display: flex; flex-direction: column; gap: 5px; }
 .trait { display: grid; grid-template-columns: 96px 1fr 36px; align-items: center; gap: 8px; font-size: 12px; }
