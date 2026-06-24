@@ -36,6 +36,7 @@ const TASK_TECH: Partial<Record<Task, TechId>> = { cook: "cooking", hunt: "hunti
 const LANGUAGE_STEPS = ["Grunts", "Gestures", "Symbols", "Speech", "Writing", "Print"];
 const SEASONS = ["❄ Winter", "🌱 Spring", "☀ Summer", "🍂 Autumn"];
 const TUTORIAL_KEY = "dawn-tutorial-seen";
+const GOAL_NUDGE_KEY = "dawn-goal-dismissed";
 
 export class UIOverlay {
   private root: HTMLElement;
@@ -75,7 +76,11 @@ export class UIOverlay {
           <span>Pop <b data-el="pop">0</b></span>
           <span data-el="season">❄ Winter</span>
         </div>
-        <div class="goal" data-el="goal"></div>
+        <div class="goal hidden" data-el="goal">
+          <span class="goal-label">Next objective</span>
+          <span class="goal-text" data-el="goal-text"></span>
+          <button class="goal-x" data-act="goal-dismiss" title="Dismiss">×</button>
+        </div>
         <div class="eratrack" data-el="eratrack"></div>
       </div>
 
@@ -146,21 +151,25 @@ export class UIOverlay {
 
       <div class="tutorial hidden" data-el="tutorial">
         <div class="modal-card">
-          <h3>Guide your tribe from the Stone Age to the Modern world</h3>
+          <h3>Guide your tribe from the Stone Age to the Information Age</h3>
           <ol>
-            <li>Press <b>▶ Play</b> and pick a speed.</li>
-            <li><b>Assign</b> people to gather/hunt to feed everyone, and to <b>research</b> to climb the tech tree.</li>
-            <li>Watch the <b>genome bars</b> drift as the world selects — and the sprites slowly become modern.</li>
-            <li>Meet other peoples and <b>interbreed</b> for new strengths. Reach the <b>Modern</b> era to win.</li>
+            <li><b>Start here:</b> press <b>▶ Play</b> and pick a speed (1× / 2× / 4×).</li>
+            <li><b>Feed everyone:</b> assign people to 🌿 Gather and 🦴 Hunt below.</li>
+            <li><b>Advance:</b> assign 💡 Research and follow the <b>Next objective</b> nudge up top for what to unlock next.</li>
+            <li><b>Explore:</b> use <b>🗺 Map</b> to migrate between regions and <b>🌳 Family</b> to trace your lineage.</li>
+            <li>Meet other peoples and <b>interbreed</b> for new strengths. Reach the <b>Information Age</b> to win.</li>
           </ol>
-          <div class="modal-actions"><button data-act="tutorial-ok" class="primary">Let's begin</button></div>
+          <div class="modal-actions">
+            <button data-act="tutorial-ok">Skip</button>
+            <button data-act="tutorial-ok" class="primary">Let's begin</button>
+          </div>
         </div>
       </div>
     `;
 
     const q = (sel: string) => this.root.querySelector(sel) as HTMLElement;
     for (const k of [
-      "era", "year", "gen", "pop", "season", "goal", "eratrack", "resources", "legacy",
+      "era", "year", "gen", "pop", "season", "goal", "goal-text", "eratrack", "resources", "legacy",
       "traits", "graph", "labor", "tasks", "lang", "techtree", "log",
       "encounter", "encounter-text", "endscreen", "end-title", "end-body", "end-card", "tutorial",
     ]) {
@@ -218,6 +227,10 @@ export class UIOverlay {
       if (a === "interbreed-yes") { this.ctrl.resolveEncounter(true); this.ctrl.paused = false; }
       if (a === "interbreed-no") { this.ctrl.resolveEncounter(false); this.ctrl.paused = false; }
       if (a === "tutorial-ok") { this.el.tutorial.classList.add("hidden"); localStorage.setItem(TUTORIAL_KEY, "1"); }
+      if (a === "goal-dismiss") {
+        localStorage.setItem(GOAL_NUDGE_KEY, this.el["goal-text"].textContent || "");
+        this.el.goal.classList.add("hidden");
+      }
     });
   }
 
@@ -238,7 +251,12 @@ export class UIOverlay {
     this.el.gen.textContent = String(s.generation);
     this.el.pop.textContent = String(avg.count);
     this.el.season.textContent = SEASONS[s.world.seasonIndex];
-    this.el.goal.textContent = s.goal;
+    // Next-objective nudge: show the current goal unless this exact goal was dismissed.
+    this.el["goal-text"].textContent = s.goal;
+    this.el.goal.classList.toggle(
+      "hidden",
+      !s.goal || localStorage.getItem(GOAL_NUDGE_KEY) === s.goal,
+    );
 
     (this.root.querySelector('[data-act="pause"]') as HTMLElement).textContent = this.ctrl.paused
       ? "▶ Play"

@@ -1,0 +1,9 @@
+{
+  "taskId": "ux-onboarding-polish",
+  "claim": "In src/ui/overlay.ts (+ style.css) the first-run tutorial now has clearer numbered first steps and an explicit pointer to the 🗺 Map and 🌳 Family buttons, and state.goal renders as a dismissible 'Next objective' nudge whose × persists the dismissed goal text in localStorage (key dawn-goal-dismissed); the existing once-only/remembered tutorial (key dawn-tutorial-seen) is unchanged, no sim/ files were touched, and npm test (34 passing) and npm run build both pass.",
+  "filesChanged": ["src/ui/overlay.ts", "src/ui/style.css"],
+  "ranTests": true,
+  "ranBuild": true,
+  "ranSim": false,
+  "notes": "Changes are purely presentational (DOM + CSS); src/sim is untouched so sim balance is unaffected (npm run sim skipped per the rule). The goal nudge stores the exact dismissed goal string, so it reappears when state.goal changes to a new objective (e.g. on entering a new era). No UI test was added: the repo has no DOM/jsdom test harness (vitest runs node-env, jsdom is not a dependency) and adding one would be out of scope; behavior is verifiable via the build and by clicking ×/checking localStorage."
+}
