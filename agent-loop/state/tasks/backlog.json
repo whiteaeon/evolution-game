@@ -142,5 +142,236 @@
     "title": "Keep late-game smooth at large populations",
     "description": "Profile the per-tick cost as population and the retained-individuals array grow into the thousands over a long run, and cut the worst offenders (allocations in hot loops, repeated full scans) without changing behaviour. Determinism must be exactly preserved.",
     "verify": "All tests pass byte-identically (same seed -> same winning year); npm build passes; AGENT_REPORT shows a measured reduction in per-tick work or allocations; change confined to hot paths."
+  },
+
+  {
+    "id": "quests-system-sim",
+    "priority": 19,
+    "type": "feature",
+    "title": "Quest/objective system (pure sim)",
+    "description": "Add a pure-sim quest model: a handful of objective-driven quests (e.g. 'reach 30 population', 'discover fire before year 30', 'interbreed with all three lineages', 'survive a winter event chain', 'found a settlement in a new biome') with live progress tracking, completion, and a small reward (food/materials/a one-off bonus). Quests live in state, are serialize-safe, and are evaluated each tick. No rendering.",
+    "verify": "New unit tests cover quest progress + completion + reward deterministically and a save/load round-trip including quest state; npm test/build pass; sim still reaches the Information Age; src/sim only, no Phaser/DOM."
+  },
+  {
+    "id": "quests-ui-panel",
+    "priority": 20,
+    "type": "feature",
+    "title": "Quest log panel",
+    "description": "Surface active and completed quests in the overlay: title, one-line description, a progress bar, and the reward. Reads quest state from the sim; updates as progress changes; a subtle toast/log entry on completion.",
+    "verify": "npm test/build pass; quests render with live progress and a completion cue; no src/sim changes; no console errors."
+  },
+  {
+    "id": "narrative-event-expansion",
+    "priority": 21,
+    "type": "content",
+    "title": "Expand the choice-driven event chains (6+ new)",
+    "description": "Build on the existing EVENT_CHAINS system: add at least six new branching events with real flavor and sim-affecting outcomes (e.g. a prophet/seer, a great migration omen, a feud, a bountiful flood, a stranger bearing knowledge, a sacred-site discovery). Each option has a clear trade-off; keep the cautious=0 / risky=1 convention.",
+    "verify": "Unit tests cover each new event's branches deterministically; npm test/build pass; sim still reaches the Information Age; pending-choice pattern reused (no sim/render leak)."
+  },
+  {
+    "id": "lore-codex",
+    "priority": 22,
+    "type": "content",
+    "title": "Lore codex / encyclopedia",
+    "description": "A data-driven codex of short lore entries for techs, biomes, lineages, and events, unlocked as the player discovers each. A new 'Codex' panel lists unlocked entries with their flavor text. Lore content is data (a table) the UI reads; discovery state can derive from existing knowledge/sim state.",
+    "verify": "npm test/build pass; entries unlock as their subject is discovered and read correctly; lore data is well-formed (a small test can assert every tech/biome has an entry); no sim/render-split violation."
+  },
+  {
+    "id": "dynastic-chronicle",
+    "priority": 23,
+    "type": "feature",
+    "title": "Readable dynastic chronicle (history book)",
+    "description": "Generate a readable 'history of the tribe' from the run: named notable individuals (uses the naming + notable-individuals work), era milestones, disasters/bounties, interbreedings, and quest completions — woven into short prose entries by year. A Chronicle/History view displays it. Pure UI over existing log + lineage data.",
+    "verify": "npm test/build pass; the history view reads coherently from a real run; helper that composes entries is pure + unit-tested; no src/sim changes."
+  },
+  {
+    "id": "dialogue-flavor-lines",
+    "priority": 24,
+    "type": "content",
+    "title": "Flavor dialogue on encounters & milestones",
+    "description": "Add short, data-driven flavor/dialogue lines that appear on encounters, event chains, era changes, and notable births/deaths — giving the tribe a voice. Lines are a content table keyed by situation; the UI picks one (seeded for determinism if shown in sim-driven contexts).",
+    "verify": "npm test/build pass; lines appear in the right situations and never block; content table is well-formed; no sim/render-split violation."
+  },
+
+  {
+    "id": "rival-tribes-sim-model",
+    "priority": 25,
+    "type": "feature",
+    "title": "Rival/neighbour tribes (pure-sim model)",
+    "description": "Introduce one or more lightweight AI neighbouring tribes that exist on the region map, each with its own population, strength, era/tech level, home region, and a disposition toward you that drifts over time. They grow/decline on their own simple rules. Pure sim, serialize-safe, deterministic. No diplomacy actions yet — just their presence and evolution.",
+    "verify": "New unit tests cover rival creation, per-tick evolution, and a save/load round-trip; npm test/build pass; sim still reaches the Information Age; src/sim only."
+  },
+  {
+    "id": "rival-tribes-relations",
+    "priority": 26,
+    "type": "feature",
+    "title": "Diplomacy: relations + periodic encounters with rivals",
+    "description": "Add a relations score per rival and periodic diplomacy events (a gift, a border tension, a request) that shift it, surfaced via the existing pending-choice mechanism so the player can respond. Outcomes adjust relations and resources. Pure sim + the existing choice API.",
+    "verify": "Unit tests cover relation shifts + each diplomacy outcome deterministically; npm test/build pass; sim still reaches the Information Age; no sim/render leak."
+  },
+  {
+    "id": "rival-tribes-conflict",
+    "priority": 27,
+    "type": "feature",
+    "title": "Conflict & raids with hostile rivals",
+    "description": "When relations sour, a rival can raid you (and you can respond). Outcome scales with each side's strength, population, defensive tech (hunting/bronze/iron/gunpowder), and shelter tier; losses fall on both sides per the existing mortality model. Keep it bounded and deterministic.",
+    "verify": "Unit tests cover skirmish outcomes deterministically (stronger/better-defended side fares better); npm test/build pass; sim still reaches the Information Age; balance not broken; src/sim only."
+  },
+  {
+    "id": "rival-tribes-trade",
+    "priority": 28,
+    "type": "feature",
+    "title": "Trade with friendly rivals",
+    "description": "With a friendly rival, allow trading food/materials/knowledge for mutual benefit (e.g. trade surplus food for a tech-research boost or a resource you lack). A periodic trade offer via the choice mechanism. Pure sim + choice API.",
+    "verify": "Unit tests cover the trade exchange deterministically; npm test/build pass; sim still reaches the Information Age; no sim/render leak."
+  },
+  {
+    "id": "rival-tribes-ui",
+    "priority": 29,
+    "type": "feature",
+    "title": "Neighbours on the map + diplomacy panel",
+    "description": "Show rival tribes on the region map with their disposition (colour/icon), and a small diplomacy panel listing each neighbour with relations and any available action (gift/trade/threaten) wired to the sim's diplomacy API. UI reads sim state only.",
+    "verify": "npm test/build pass; rivals render on the map with correct disposition and the panel actions call the sim; no src/sim changes; no console errors."
+  },
+
+  {
+    "id": "resources-depth-sim",
+    "priority": 30,
+    "type": "feature",
+    "title": "Carryable resources (wood / stone / hide)",
+    "description": "Add a small set of gathered resources beyond food (e.g. wood, stone, hide) with per-biome availability, gathered by assigned workers, that gate building shelters and some tech/era progress. Fold the tunables into the BALANCE block. Pure sim; keep the run completable.",
+    "verify": "Unit tests cover resource production + that shelter/tech gating respects them; npm test/build pass; the autopilot still reaches the Information Age in range; src/sim only."
+  },
+  {
+    "id": "resources-ui",
+    "priority": 31,
+    "type": "feature",
+    "title": "Surface the new resources in the UI",
+    "description": "Show wood/stone/hide stocks and their production in the resources panel, and reflect gating (e.g. a shelter upgrade waiting on stone). UI reads sim state.",
+    "verify": "npm test/build pass; resource stocks + gating display correctly; no src/sim changes; no console errors."
+  },
+  {
+    "id": "scouting-exploration",
+    "priority": 32,
+    "type": "feature",
+    "title": "Scouting: reveal regions & find resources/events",
+    "description": "Let the player assign scouts (from the labour pool) to explore: over time they reveal adjacent fog-of-war regions and can surface a resource cache or a small event. Builds on the existing fog-of-war discovery. Pure sim + the existing task/choice systems.",
+    "verify": "Unit tests cover scouting revealing regions + its outcomes deterministically; npm test/build pass; sim still reaches the Information Age; src/sim only."
+  },
+  {
+    "id": "second-settlement-sim",
+    "priority": 33,
+    "type": "feature",
+    "title": "Found a second settlement (sim model)",
+    "description": "Allow founding a second camp in a discovered region, splitting off some population; each settlement tracks its own shelter, production, and local biome pressures, while sharing knowledge/culture. Start with exactly two settlements and a clean serialize-safe model. Ambitious but bounded — focus on a correct, tested sim model (UI can come later).",
+    "verify": "New unit tests cover founding, per-settlement production, and a save/load round-trip; npm test/build pass; the autopilot still reaches the Information Age; determinism preserved; src/sim only."
+  },
+  {
+    "id": "seasons-depth",
+    "priority": 34,
+    "type": "balance",
+    "title": "Make seasons matter (scarcity & growth windows)",
+    "description": "Deepen the existing season cycle so winter meaningfully tightens food/production and spring/summer boost it, nudging migration and storage decisions — without making the game unfair. Tune via BALANCE. Pure sim.",
+    "verify": "Updated tests assert the seasonal swing and that the autopilot still reaches the Information Age in range; npm test/build pass; change confined to src/sim BALANCE/world logic."
+  },
+
+  {
+    "id": "leaders-chieftains",
+    "priority": 35,
+    "type": "feature",
+    "title": "Leaders / chieftains with tribe-wide effects",
+    "description": "Each generation has a leader (a notable living individual) whose standout traits grant small tribe-wide bonuses (e.g. a strong leader boosts defense, a smart one boosts research, a speechful one boosts cooperation). On a leader's death, a succession event picks the next. Pure sim + tests; surfaces via existing chronicle/notable data.",
+    "verify": "Unit tests cover leader selection, the trait-driven bonus, and succession deterministically; npm test/build pass; sim still reaches the Information Age; src/sim only."
+  },
+  {
+    "id": "culture-belief-track",
+    "priority": 36,
+    "type": "feature",
+    "title": "Culture / belief progression",
+    "description": "Add a culture/belief track (parallel to the language chain) that accrues from rituals/burial/art and unlocks small cohesion bonuses and belief-flavored events. Data-driven effects aggregated like tech. Pure sim + tests.",
+    "verify": "Unit tests cover culture accrual + its effects; npm test/build pass; sim still reaches the Information Age; src/sim only; effects are data-driven."
+  },
+  {
+    "id": "governance-policies",
+    "priority": 37,
+    "type": "feature",
+    "title": "Tribe policies with trade-offs",
+    "description": "Let the player pick one or two standing policies with genuine trade-offs (e.g. communal vs competitive: cooperation/research vs individual fitness pressure; expansion vs consolidation: capacity vs stability). Threaded through config/state into the existing fitness/production math. Keep the game completable under any choice.",
+    "verify": "Tests assert each policy's effect and that the autopilot still wins under the default; npm test/build pass; the UI exposes the choice; sim reads policy state only."
+  },
+  {
+    "id": "epidemics-depth",
+    "priority": 38,
+    "type": "feature",
+    "title": "Epidemics that scale with density & era",
+    "description": "Make disease richer: occasional epidemics whose severity scales with population density, biome, and era, mitigated by medicine/sanitation/vaccines, and which select harder on diseaseResistance. Bounded and deterministic; must not make the game unwinnable.",
+    "verify": "Unit tests cover epidemic severity + mitigation deterministically; npm test/build pass; the autopilot still reaches the Information Age; balance preserved; src/sim only."
+  },
+
+  {
+    "id": "scenarios-starts",
+    "priority": 39,
+    "type": "content",
+    "title": "Selectable start scenarios",
+    "description": "Add a few distinct start scenarios (e.g. Frozen World, Lush Valley, Lonely Island, Crowded Lands) that set starting region/biome, population, resources, and pressures for varied challenge. Builds on the difficulty-presets work; scenarios are a config table; the sim just receives config.",
+    "verify": "A test asserts each scenario yields a valid, completable config (autopilot reaches the Information Age on the standard ones); npm test/build pass; scenario is selectable in the new-run flow; sim untouched except reading config."
+  },
+  {
+    "id": "run-mutators",
+    "priority": 40,
+    "type": "content",
+    "title": "Optional run mutators",
+    "description": "Add toggleable run modifiers at new-run (e.g. harsh disease, abundant game, fast eras, ice age, hostile neighbours) that adjust existing config/BALANCE knobs for replay variety. Thread through config; combine cleanly.",
+    "verify": "Tests assert mutators apply and the game stays completable in sane combinations; npm test/build pass; mutators selectable in the UI; sim reads config only."
+  },
+
+  {
+    "id": "music-era-themes",
+    "priority": 41,
+    "type": "audio",
+    "title": "Generative era-aware background music",
+    "description": "Layer a gentle, generative musical bed on the existing WebAudio ambient (off by default) that shifts mode/instrumentation by era — Paleolithic drones to a fuller Information-Age texture. No heavy assets; synthesized. Pure UI; never autoplay.",
+    "verify": "npm build passes; music stays off until enabled and only starts after a user gesture; shifts by era; no src/sim changes."
+  },
+  {
+    "id": "sprite-animation-depth",
+    "priority": 42,
+    "type": "art",
+    "title": "Richer hominin animation",
+    "description": "Add more life to the tribe sprites: a couple more walk/idle/work frames and small era-appropriate motion, building on the existing 2-frame walk, still keyed by morph signature so textures stay deduped. Render-only.",
+    "verify": "npm build passes; sprites animate more richly without per-frame texture explosion; no src/sim changes; framebuffer still renders."
+  },
+  {
+    "id": "feedback-juice",
+    "priority": 43,
+    "type": "polish",
+    "title": "Juicy feedback for key events",
+    "description": "Add tasteful visual/audio feedback for births, deaths, discoveries, raids/battles, and quest completions — floating text, small particle bursts, and the existing SFX hooks — so the world feels alive. Render/UI only; performant and capped.",
+    "verify": "npm build passes; feedback fires on the right events and stays performant; no src/sim changes; no console errors."
+  },
+  {
+    "id": "ui-theme-polish",
+    "priority": 44,
+    "type": "polish",
+    "title": "Overlay polish: transitions, tooltips, iconography",
+    "description": "A cohesive polish pass on the DOM overlay: smooth panel transitions, helpful tooltips on stats/controls, clearer icons, and tightened layout/spacing — keeping the warm pixel aesthetic. UI/CSS only.",
+    "verify": "npm build passes; the overlay looks cleaner and tooltips work; no src/sim changes; no console errors."
+  },
+
+  {
+    "id": "sim-module-split",
+    "priority": 45,
+    "type": "perf",
+    "title": "Split the growing simulation.ts into modules",
+    "description": "As simulation.ts has grown, extract cohesive concerns (events, reproduction, production, world/season, rivals) into focused modules with no behaviour change. Pure refactor; the public Simulation API and determinism must be preserved exactly.",
+    "verify": "ALL tests pass byte-identically (same seed -> same winning year); npm build passes; no behaviour change; the sim/render split is intact; only src/sim files moved/split."
+  },
+  {
+    "id": "save-versioning",
+    "priority": 46,
+    "type": "tech",
+    "title": "Versioned saves that round-trip the new systems",
+    "description": "Give the save format an explicit version and safe upgrade path so saves round-trip all the newer systems (quests, rivals, resources, settlements, culture) and older saves still load with sensible defaults. Pure sim/serialization.",
+    "verify": "Tests cover a full round-trip of the new state and loading a prior-version save with defaults; npm test/build pass; determinism preserved on resume; src/sim only."
   }
 ]
