@@ -9,6 +9,12 @@ import {
   type BiomeProfile,
 } from "./regions.js";
 import {
+  initQuests,
+  evaluateQuests,
+  type QuestContext,
+  type QuestProgress,
+} from "./quests.js";
+import {
   ERAS,
   LINEAGES,
   SHELTERS,
@@ -166,9 +172,15 @@ export interface SimState {
     migrations: number;
     /** Largest living population reached this run. */
     peakPopulation: number;
+    /** Hard-winter event chains the tribe has resolved (survived). */
+    winterChainsSurvived: number;
+    /** Distinct hominin lineages the tribe has interbred with. */
+    lineagesInterbred: Lineage[];
   };
   /** A short, human-readable description of the next objective. */
   goal: string;
+  /** Objective-driven quests with live progress, completion and rewards. */
+  quests: QuestProgress[];
 }
 
 export interface TraitAverages {
@@ -216,8 +228,17 @@ export class Simulation {
       researchTarget: knowledge.available()[0] ?? null,
       pendingEncounter: null,
       pendingChoice: null,
-      totals: { births: 0, deaths: 0, interbred: 0, migrations: 0, peakPopulation: individuals.length },
+      totals: {
+        births: 0,
+        deaths: 0,
+        interbred: 0,
+        migrations: 0,
+        peakPopulation: individuals.length,
+        winterChainsSurvived: 0,
+        lineagesInterbred: [],
+      },
       goal: "",
+      quests: initQuests(),
     };
   }
 
@@ -386,6 +407,7 @@ export class Simulation {
     this.tryUpgradeShelter();
     this.updateEraAndGeneration();
     s.totals.peakPopulation = Math.max(s.totals.peakPopulation, this.living.length);
+    this.evaluateQuests();
 
     // Soft storage cap: surplus food can't grow unbounded — it's bounded by the
     // tribe's carrying capacity (shelter tier / biome / tech), keeping mid/late
@@ -655,6 +677,7 @@ export class Simulation {
       s.totals.births++;
     }
     s.totals.interbred++;
+    if (!s.totals.lineagesInterbred.includes(enc.lineage)) s.totals.lineagesInterbred.push(enc.lineage);
     this.logEvent("encounter", `Interbred with ${LINEAGE_NAME[enc.lineage]} — new blood strengthens the line.`);
   }
 
@@ -707,6 +730,7 @@ export class Simulation {
     const risky = option === 1;
     switch (c.id) {
       case "hardWinter":
+        s.totals.winterChainsSurvived++;
         if (risky) {
           const gain = 18 * s.world.abundance;
           s.resources.food += gain;
@@ -878,6 +902,31 @@ export class Simulation {
     const missing = def.prereqs.filter((p) => !s.knowledge.has(p));
     if (missing.length === 0) return `Research ${def.name} to enter the ${nextEra}.`;
     return `For the ${nextEra}: research ${missing.map((m) => TECH_TREE[m].name).join(", ")} → ${def.name}.`;
+  }
+
+  /**
+   * Advance the quest log against the current state and grant the reward for any
+   * quest completed this tick. The context is derived purely from sim state, so
+   * quests stay a read-only layer over the simulation.
+   */
+  private evaluateQuests(): void {
+    const s = this.state;
+    const startBiome = regionById(this.config.startRegion ?? DEFAULT_REGION).biome;
+    const settled = SHELTERS.indexOf(s.shelter) >= SHELTERS.indexOf("village");
+    const ctx: QuestContext = {
+      tick: s.tick,
+      population: this.living.length,
+      hasFire: s.knowledge.has("fire"),
+      lineageCount: s.totals.lineagesInterbred.length,
+      winterChainsSurvived: s.totals.winterChainsSurvived,
+      settlementInNewBiome: settled && s.biome !== startBiome,
+    };
+    const completed = evaluateQuests(s.quests, ctx);
+    for (const def of completed) {
+      if (def.reward.food) s.resources.food += def.reward.food;
+      if (def.reward.materials) s.resources.materials += def.reward.materials;
+      this.logEvent("milestone", `Quest complete — ${def.title}: ${def.description}`);
+    }
   }
 
   protected logEvent(type: SimEventType, message: string): void {
