@@ -196,6 +196,8 @@ button.big { font-weight: 700; padding: 7px 14px; }
 .tree-side { flex: 1 1 auto; min-width: 180px; display: flex; flex-direction: column; gap: 8px; }
 .tree-pick { display: flex; gap: 6px; align-items: center; font-size: 12px; flex-wrap: wrap; }
 .tree-pick select { background: var(--panel2); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 3px; max-width: 150px; }
+.tree-search { background: var(--panel2); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 3px; width: 70px; }
+.tree-search.bad { border-color: #d9534f; }
 .tree-inspect { background: #2c2114; border: 1px solid var(--line); border-radius: 8px; padding: 8px; font-size: 12px; flex: 1 1 auto; }
 .ins-h { font-weight: 700; color: var(--accent); }
 .ins-meta { color: var(--ink-dim); margin: 2px 0 6px; font-size: 11px; }

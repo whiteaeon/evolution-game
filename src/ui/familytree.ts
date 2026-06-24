@@ -6,11 +6,53 @@ interface Node {
   x: number; // world coords
   y: number;
   depth: number;
-  hasMore: boolean; // ancestors exist beyond the drawn depth
+  hasMore: boolean; // ancestors/descendants exist beyond the drawn depth
 }
 
 const LEVEL_H = 70;
 const MAX_DEPTH = 6;
+
+type TreeMode = "ancestry" | "descendants";
+
+/** A descendant of the focal individual, with its children nested below. */
+export interface PedNode {
+  ind: Individual;
+  children: PedNode[];
+  truncated: boolean; // children exist beyond the requested depth
+}
+
+/**
+ * Pure lineage walk: build the descendant tree rooted at `focalId`, following
+ * motherId/fatherId backwards (a child of X has X as a parent). Deduplicates so
+ * an individual reachable by multiple paths is drawn once, and marks nodes whose
+ * children were cut off at `maxDepth`. Returns null if the focal id is unknown.
+ */
+export function descendantTree(
+  individuals: Individual[],
+  focalId: number,
+  maxDepth: number,
+): PedNode | null {
+  const focal = individuals.find((i) => i.id === focalId);
+  if (!focal) return null;
+  const childrenOf = (id: number) =>
+    individuals.filter((i) => i.motherId === id || i.fatherId === id);
+  const seen = new Set<number>();
+  const build = (ind: Individual, depth: number): PedNode => {
+    seen.add(ind.id);
+    const children: PedNode[] = [];
+    let truncated = false;
+    for (const kid of childrenOf(ind.id)) {
+      if (seen.has(kid.id)) continue;
+      if (depth >= maxDepth) {
+        truncated = true;
+        continue;
+      }
+      children.push(build(kid, depth + 1));
+    }
+    return { ind, children, truncated };
+  };
+  return build(focal, 0);
+}
 
 /**
  * A navigable family tree. Shows the ancestry of a focal individual — parents
@@ -27,6 +69,7 @@ export class FamilyTree {
 
   private focalId: number | null = null;
   private inspectId: number | null = null;
+  private mode: TreeMode = "ancestry";
   private nodes: Node[] = [];
   private panX = 0;
   private panY = 0;
@@ -53,6 +96,10 @@ export class FamilyTree {
               <label>Focus: <select data-el="pick"></select></label>
               <button data-act="tree-reset">Youngest</button>
             </div>
+            <div class="tree-pick">
+              <button data-act="tree-mode" data-el="modebtn">View: Ancestry</button>
+              <label>Find #<input data-el="search" type="number" min="0" class="tree-search" placeholder="id" /></label>
+            </div>
             <div class="tree-inspect" data-el="inspect">Click a person to inspect.</div>
             <div class="tree-legend">
               <span class="lg-f">● female</span> <span class="lg-m">● male</span>
@@ -72,10 +119,31 @@ export class FamilyTree {
         this.focalId = this.defaultFocal();
         this.recenter();
       }
+      if (btn?.dataset.act === "tree-mode") {
+        this.mode = this.mode === "ancestry" ? "descendants" : "ancestry";
+        this.updateModeBtn();
+        this.recenter();
+      }
     });
     this.host.querySelector('[data-el="pick"]')!.addEventListener("change", (e) => {
       this.focalId = Number((e.target as HTMLSelectElement).value);
       this.recenter();
+    });
+    const search = this.host.querySelector('[data-el="search"]') as HTMLInputElement;
+    const jump = () => {
+      const id = Number(search.value);
+      if (search.value !== "" && this.ctrl.sim.individualById(id)) {
+        this.focalId = id;
+        this.inspectId = id;
+        this.recenter();
+        search.classList.remove("bad");
+      } else if (search.value !== "") {
+        search.classList.add("bad");
+      }
+    };
+    search.addEventListener("change", jump);
+    search.addEventListener("keydown", (e) => {
+      if ((e as KeyboardEvent).key === "Enter") jump();
     });
 
     this.canvas.addEventListener("mousedown", (e) => {
@@ -127,15 +195,25 @@ export class FamilyTree {
 
   private recenter(): void {
     this.panX = this.canvas.width / 2;
-    this.panY = this.canvas.height - 50;
+    // ancestors grow upward (anchor low), descendants grow downward (anchor high)
+    this.panY = this.mode === "descendants" ? 60 : this.canvas.height - 50;
     this.zoom = 1;
   }
 
-  /** Build the ancestor layout for the focal individual. */
+  private updateModeBtn(): void {
+    const btn = this.host.querySelector('[data-el="modebtn"]') as HTMLButtonElement;
+    if (btn) btn.textContent = this.mode === "descendants" ? "View: Descendants" : "View: Ancestry";
+  }
+
+  /** Build the layout for the focal individual — ancestors above or descendants below. */
   private layout(): void {
     this.nodes = [];
     const focal = this.focalId !== null ? this.ctrl.sim.individualById(this.focalId) : undefined;
     if (!focal) return;
+    if (this.mode === "descendants") {
+      this.layoutDescendants(focal);
+      return;
+    }
     const place = (ind: Individual, x: number, y: number, depth: number, span: number) => {
       const mother = ind.motherId !== undefined ? this.ctrl.sim.individualById(ind.motherId) : undefined;
       const father = ind.fatherId !== undefined ? this.ctrl.sim.individualById(ind.fatherId) : undefined;
@@ -146,6 +224,21 @@ export class FamilyTree {
       if (father) place(father, x + span / 2, y - LEVEL_H, depth + 1, span / 2);
     };
     place(focal, 0, 0, 0, 320);
+  }
+
+  /** Build the descendant layout: focal at top, children fanned out below. */
+  private layoutDescendants(focal: Individual): void {
+    const tree = descendantTree(this.ctrl.sim.state.individuals, focal.id, MAX_DEPTH);
+    if (!tree) return;
+    const place = (node: PedNode, x: number, y: number, depth: number, span: number) => {
+      this.nodes.push({ ind: node.ind, x, y, depth, hasMore: node.truncated });
+      const kids = node.children;
+      kids.forEach((kid, i) => {
+        const kx = kids.length === 1 ? x : x - span / 2 + (span * i) / (kids.length - 1);
+        place(kid, kx, y + LEVEL_H, depth + 1, span / 2);
+      });
+    };
+    place(tree, 0, 0, 0, 320);
   }
 
   private screen(n: Node): { x: number; y: number } {
@@ -190,8 +283,10 @@ export class FamilyTree {
       const c = this.screen(n);
       const mid = n.ind.motherId;
       const fid = n.ind.fatherId;
+      // ancestry: a node's parents sit one level deeper; descendants: one shallower
+      const linkDepth = this.mode === "descendants" ? n.depth - 1 : n.depth + 1;
       for (const pid of [mid, fid]) {
-        const pn = this.nodes.find((m) => m.ind.id === pid && m.depth === n.depth + 1);
+        const pn = this.nodes.find((m) => m.ind.id === pid && m.depth === linkDepth);
         if (!pn) continue;
         const p = this.screen(pn);
         ctx.beginPath();
@@ -218,7 +313,7 @@ export class FamilyTree {
       else if (n.depth === 0) { ctx.strokeStyle = "#ffffff"; ctx.stroke(); }
       if (founder) { ctx.strokeStyle = "#ffd166"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(s.x, s.y, r + 2.5, 0, Math.PI * 2); ctx.stroke(); }
       if (n.ind.lineage) { ctx.fillStyle = "#c9b3ff"; ctx.fillRect(s.x - 1.5, s.y - r - 5, 3, 3); }
-      if (n.hasMore) { ctx.fillStyle = "#ffe08a"; ctx.fillText("▲", s.x - 3, s.y - r - 3); }
+      if (n.hasMore) { ctx.fillStyle = "#ffe08a"; ctx.fillText(this.mode === "descendants" ? "▼" : "▲", s.x - 3, s.y - r - 3); }
       ctx.fillStyle = "#f3e6d2";
       ctx.font = `${Math.round(9 * this.zoom)}px monospace`;
       ctx.fillText(`#${n.ind.id}`, s.x - 8, s.y + r + 9);
