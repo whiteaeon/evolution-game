@@ -1,9 +1,0 @@
-{
-  "taskId": "audio-ambient-music",
-  "claim": "Extended src/ui/audio.ts with a gentle era-aware generative ambient pad (start/stop/setEra) and birth/discovery SFX, all gated behind the existing enabled flag so nothing sounds or creates an AudioContext until the player toggles sound on (a user gesture); wired into src/ui/overlay.ts only, with no src/sim changes.",
-  "filesChanged": ["src/ui/audio.ts", "src/ui/overlay.ts"],
-  "ranTests": true,
-  "ranBuild": true,
-  "ranSim": false,
-  "notes": "Audio stays OFF by default: enabled=false and ensure() returns null (never constructs AudioContext) until toggle() flips it on, which only happens from a click handler. The ambient pad (root+fifth+octave with two slow LFOs breathing volume/cutoff) starts on toggle-on, retunes via setEra(eraIndex) called each render frame, and ramps down/stops on toggle-off. birth() fires when s.totals.births increases and discovery() when knowledge.discovered.size increases, both skipping the first-frame baseline. No src/sim files touched, so npm run sim was not needed; npm test (34 passed) and npm run build both pass."
-}
