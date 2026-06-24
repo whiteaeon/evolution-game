@@ -47,6 +47,8 @@ export class UIOverlay {
   private lastSample = -1;
   private lastTechCount = -1;
   private lastEra = "";
+  private lastBirths = -1;
+  private lastDiscovered = -1;
   private graphCtx: CanvasRenderingContext2D | null = null;
   private map: MapView;
   private tree: FamilyTree;
@@ -246,6 +248,7 @@ export class UIOverlay {
 
     // era track highlight
     const eraIdx = ERAS.indexOf(s.era);
+    this.audio.setEra(eraIdx);
     this.root.querySelectorAll("[data-erapip]").forEach((p) => {
       const pe = (p as HTMLElement).dataset.erapip as Era;
       p.classList.toggle("done", ERAS.indexOf(pe) < eraIdx);
@@ -308,6 +311,13 @@ export class UIOverlay {
       if (this.lastEra) this.audio.chime();
       this.lastEra = s.era;
     }
+
+    // light SFX on births and discoveries (only after the first frame baseline)
+    const discovered = s.knowledge.discovered.size;
+    if (this.lastBirths >= 0 && s.totals.births > this.lastBirths) this.audio.birth();
+    if (this.lastDiscovered >= 0 && discovered > this.lastDiscovered) this.audio.discovery();
+    this.lastBirths = s.totals.births;
+    this.lastDiscovered = discovered;
     this.renderEndScreen(s, avg.count);
   }
 
