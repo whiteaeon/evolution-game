@@ -30,6 +30,43 @@ const DECOR_BY_BIOME: Record<Biome, string[]> = {
   coast: ["bush", "tree", "rock"],
 };
 
+// Light, biome-appropriate ambience. tundra is left bare — the snow overlay
+// already supplies its drifting motes.
+type AmbienceKind = "none" | "dust" | "leaves" | "spray";
+
+const AMBIENCE_BY_BIOME: Record<Biome, AmbienceKind> = {
+  tundra: "none",
+  forest: "leaves",
+  river: "leaves",
+  grassland: "dust",
+  desert: "dust",
+  coast: "spray",
+};
+
+interface AmbienceCfg {
+  count: number; // hard cap on particles for this kind
+  colors: number[];
+  size: [number, number];
+  alpha: number;
+  vx: [number, number]; // px/frame at ~60fps, scaled by dt
+  vy: [number, number];
+  sway: number; // horizontal wobble amplitude
+}
+
+const AMBIENCE_CFG: Record<Exclude<AmbienceKind, "none">, AmbienceCfg> = {
+  dust: { count: 22, colors: [0xe8d4a0, 0xd8c090, 0xf0e4c0], size: [1, 2], alpha: 0.5, vx: [0.6, 1.6], vy: [-0.2, 0.2], sway: 0.05 },
+  leaves: { count: 16, colors: [0x6f9c3d, 0x4f7a2a, 0xb07a2a], size: [2, 3], alpha: 0.7, vx: [-0.5, 0.5], vy: [0.4, 1.0], sway: 0.25 },
+  spray: { count: 18, colors: [0xeaf4ff, 0xcfe6f5, 0xffffff], size: [1, 2], alpha: 0.55, vx: [-1.4, -0.5], vy: [-0.3, 0.3], sway: 0.12 },
+};
+
+interface AmbientParticle {
+  obj: Phaser.GameObjects.Rectangle;
+  vx: number;
+  vy: number;
+  sway: number;
+  phase: number;
+}
+
 interface TribeView {
   sprite: Phaser.GameObjects.Image;
   anchorX: number;
@@ -51,7 +88,11 @@ export class MainScene extends Phaser.Scene {
   private hearth!: Phaser.GameObjects.Image;
   private nightOverlay!: Phaser.GameObjects.Rectangle;
   private coldOverlay!: Phaser.GameObjects.Rectangle;
+  private warmOverlay!: Phaser.GameObjects.Rectangle;
   private snowLayer!: Phaser.GameObjects.Container;
+  private ambienceLayer!: Phaser.GameObjects.Container;
+  private ambience: AmbientParticle[] = [];
+  private ambienceKind: AmbienceKind = "none";
 
   private tribe = new Map<number, TribeView>();
   private spritePool: Phaser.GameObjects.Image[] = [];
@@ -86,6 +127,8 @@ export class MainScene extends Phaser.Scene {
     this.shelter = this.add.image(CAMP.x, CAMP.y - 6, "shelter-cave").setDepth(CAMP.y);
     this.hearth = this.add.image(CAMP.x + 2, CAMP.y + 36, "fire-0").setDepth(CAMP.y + 36).setVisible(false);
 
+    this.ambienceLayer = this.add.container(0, 0).setDepth(905);
+    this.warmOverlay = this.add.rectangle(0, 0, WORLD_W, WORLD_H, 0xffb066, 0).setOrigin(0, 0).setDepth(945);
     this.snowLayer = this.add.container(0, 0).setDepth(900);
     this.coldOverlay = this.add.rectangle(0, 0, WORLD_W, WORLD_H, 0xbcd6ff, 0).setOrigin(0, 0).setDepth(950);
     this.nightOverlay = this.add.rectangle(0, 0, WORLD_W, WORLD_H, 0x0b1437, 0).setOrigin(0, 0).setDepth(960);
@@ -124,6 +167,33 @@ export class MainScene extends Phaser.Scene {
       const img = this.add.image(x, y, this.rng.pick(kinds)).setOrigin(0.5, 1).setDepth(y);
       this.decor.add(img);
       placed++;
+    }
+
+    this.buildAmbience(biome);
+  }
+
+  /** (Re)create the capped biome ambience particles. Called on biome change. */
+  private buildAmbience(biome: Biome): void {
+    this.ambienceLayer.removeAll(true);
+    this.ambience = [];
+    this.ambienceKind = AMBIENCE_BY_BIOME[biome];
+    this.warmOverlay.setFillStyle(0xffb066, 0); // reset; desert shimmer set per-frame
+    if (this.ambienceKind === "none") return;
+
+    const cfg = AMBIENCE_CFG[this.ambienceKind];
+    for (let i = 0; i < cfg.count; i++) {
+      const size = this.rng.int(cfg.size[0], cfg.size[1]);
+      const obj = this.add
+        .rectangle(this.rng.int(0, WORLD_W), this.rng.int(0, WORLD_H), size, size, this.rng.pick(cfg.colors), cfg.alpha)
+        .setOrigin(0, 0);
+      this.ambienceLayer.add(obj);
+      this.ambience.push({
+        obj,
+        vx: this.rng.range(cfg.vx[0], cfg.vx[1]),
+        vy: this.rng.range(cfg.vy[0], cfg.vy[1]),
+        sway: cfg.sway * (0.5 + this.rng.next()),
+        phase: this.rng.next() * Math.PI * 2,
+      });
     }
   }
 
@@ -308,6 +378,35 @@ export class MainScene extends Phaser.Scene {
         if (f.y > WORLD_H) f.y = -2;
         if (f.x > WORLD_W) f.x = 0;
       }
+    }
+
+    this.syncAmbience(dt, night, snowVis);
+  }
+
+  /** Drift the biome ambience particles, fading them out at night and under snow. */
+  private syncAmbience(dt: number, night: number, snowVis: number): void {
+    // Heat-shimmer tint over the desert, gently pulsing and gone after dark.
+    const desert = this.currentBiome === "desert";
+    const shimmer = desert ? (0.04 + 0.03 * (0.5 + 0.5 * Math.sin(this.clock * 0.0008))) * (1 - night) : 0;
+    this.warmOverlay.setFillStyle(0xffb066, shimmer);
+
+    if (this.ambienceKind === "none") {
+      this.ambienceLayer.setAlpha(0);
+      return;
+    }
+    const vis = clamp01(1 - night * 0.7) * (1 - snowVis);
+    this.ambienceLayer.setAlpha(vis);
+    if (vis <= 0.01) return;
+
+    const f = dt * 0.06;
+    for (const p of this.ambience) {
+      p.phase += dt * 0.004;
+      p.obj.x += p.vx * f + Math.sin(p.phase) * p.sway;
+      p.obj.y += p.vy * f;
+      if (p.obj.x > WORLD_W) p.obj.x = -2;
+      else if (p.obj.x < -2) p.obj.x = WORLD_W;
+      if (p.obj.y > WORLD_H) p.obj.y = -2;
+      else if (p.obj.y < -2) p.obj.y = WORLD_H;
     }
   }
 
