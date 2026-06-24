@@ -67,6 +67,10 @@ function Invoke-AgentTurn {
 }
 
 # ── entry ──
+# Task Scheduler can launch with a stale environment block, so recompose PATH
+# from the registry — this guarantees the Claude CLI and tools (e.g. a freshly
+# installed .local\bin) resolve even on a run that predates the PATH change.
+$env:PATH = [Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('PATH', 'User')
 Test-AgentDeps -Mock:$Mock
 New-Item -ItemType Directory -Force -Path $ResultsDir | Out-Null
 Write-AgentLog "Repo: $RepoRoot | Model: $Model | AutoMerge: $AutoMerge | Mock: $Mock"
