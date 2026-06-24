@@ -202,7 +202,7 @@ export class Simulation {
     return {
       tick: 0,
       individuals,
-      resources: { food: 20, materials: 0, buildProgress: 0 },
+      resources: { food: this.config.startingFood ?? 20, materials: 0, buildProgress: 0 },
       knowledge,
       world: { cold: this.config.baseCold, abundance: 1, season: 0, seasonIndex: 0 },
       shelter: "cave",
@@ -393,7 +393,9 @@ export class Simulation {
     w.season = w.seasonIndex / 4;
     const seasonal = Math.cos(w.season * Math.PI * 2) * 0.18;
     w.cold = clamp01(this.config.baseCold + b.coldAdd + seasonal);
-    w.abundance = (0.9 + Math.sin(w.season * Math.PI * 2) * 0.2 + e.abundance) * b.abundance;
+    w.abundance =
+      (0.9 + Math.sin(w.season * Math.PI * 2) * 0.2 + e.abundance + (this.config.abundanceBonus ?? 0)) *
+      b.abundance;
   }
 
   private workers: Record<Task, Individual[]> = {} as Record<Task, Individual[]>;
@@ -547,20 +549,22 @@ export class Simulation {
     const roll = this.rng.next();
     const b = this.biome();
     const settled = eraIndex(s.era) >= eraIndex("Bronze Age");
+    // Difficulty preset scales how deadly random events are; 1 = standard.
+    const lethal = this.config.eventLethality ?? 1;
     if (roll < 0.35) {
-      this.applyHazard("diseaseResistance", BALANCE.diseaseLethality * b.diseaseMult * (1 - e.diseaseDefense));
+      this.applyHazard("diseaseResistance", BALANCE.diseaseLethality * lethal * b.diseaseMult * (1 - e.diseaseDefense));
       this.logEvent("disease", "A sickness sweeps the camp.");
     } else if (roll < 0.62) {
       // Predators in the wild; organised raids once settled.
       if (settled) {
-        this.applyHazard("strength", BALANCE.raidLethality * e.defenseMult);
+        this.applyHazard("strength", BALANCE.raidLethality * lethal * e.defenseMult);
         this.logEvent("raid", "Raiders strike at the settlement.");
       } else {
-        this.applyHazard("strength", BALANCE.predatorLethality * b.predatorMult * e.defenseMult);
+        this.applyHazard("strength", BALANCE.predatorLethality * lethal * b.predatorMult * e.defenseMult);
         this.logEvent("predator", "Predators stalk the tribe.");
       }
     } else if (roll < 0.8) {
-      this.applyHazard("coldTolerance", BALANCE.coldLethality * 0.8);
+      this.applyHazard("coldTolerance", BALANCE.coldLethality * lethal * 0.8);
       this.logEvent("coldSnap", "A savage cold snap descends.");
     } else {
       s.resources.food += 12 * s.world.abundance;

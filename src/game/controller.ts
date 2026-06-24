@@ -1,4 +1,4 @@
-import { Simulation, type Task } from "../sim/index.js";
+import { Simulation, DIFFICULTY_PRESETS, type Difficulty, type Task } from "../sim/index.js";
 import { foldLegacy, loadLegacy, saveLegacy, type Legacy } from "./legacy.js";
 import { loadAchievements, mergeUnlocked, saveAchievements, type AchievementId } from "./achievements.js";
 
@@ -15,6 +15,8 @@ export class GameController {
   speed = 1;
   readonly baseTicksPerSec = 0.9;
   legacy: Legacy;
+  /** Difficulty preset applied to the next run started. */
+  difficulty: Difficulty = "standard";
   /** Achievements unlocked across all runs (persisted, sticky). */
   unlocked: AchievementId[];
   /** Set once a run has ended (won/extinct) and been folded into the legacy. */
@@ -33,9 +35,9 @@ export class GameController {
     this.sim = new Simulation({
       seed,
       baseCold: 0.45,
-      startingPopulation: 10,
       carryingCapacityBase: 16,
       founderBonus: this.legacy.bonus,
+      ...DIFFICULTY_PRESETS[this.difficulty].config,
     });
     this.sim.setAllocation("gather", 4);
     this.sim.setAllocation("hunt", 2);
@@ -68,6 +70,10 @@ export class GameController {
   }
   setSpeed(mult: number): void {
     this.speed = mult;
+  }
+  /** Choose the difficulty preset; applies to the next run started. */
+  setDifficulty(d: Difficulty): void {
+    this.difficulty = d;
   }
   adjustTask(task: Task, delta: number): void {
     this.sim.setAllocation(task, this.sim.allocation[task] + delta);

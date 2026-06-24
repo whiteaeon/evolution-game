@@ -4,7 +4,10 @@ import {
   ERAS,
   TRAITS,
   TASKS,
+  DIFFICULTIES,
+  DIFFICULTY_PRESETS,
   regionById,
+  type Difficulty,
   type Era,
   type Task,
   type TechId,
@@ -141,6 +144,14 @@ export class UIOverlay {
           <button data-act="load">📂 Load</button>
           <button data-act="new">🔄 New</button>
         </div>
+        <label class="newrun">Difficulty (next run)
+          <select data-el="difficulty">
+            ${DIFFICULTIES.map(
+              (d) =>
+                `<option value="${d}"${d === "standard" ? " selected" : ""} title="${DIFFICULTY_PRESETS[d].blurb}">${DIFFICULTY_PRESETS[d].label}</option>`,
+            ).join("")}
+          </select>
+        </label>
         <div class="resources" data-el="resources"></div>
         <div class="legacy" data-el="legacy"></div>
       </div>
@@ -226,7 +237,7 @@ export class UIOverlay {
 
     const q = (sel: string) => this.root.querySelector(sel) as HTMLElement;
     for (const k of [
-      "era", "year", "gen", "pop", "season", "goal", "goal-text", "eratrack", "resources", "legacy",
+      "era", "year", "gen", "pop", "season", "goal", "goal-text", "eratrack", "resources", "legacy", "difficulty",
       "traits", "graph", "labor", "tasks", "lang", "techtree", "badges", "ach-count", "log",
       "encounter", "encounter-text", "choice", "choice-title", "choice-text",
       "endscreen", "end-title", "end-body", "end-summary", "end-card", "tutorial",
@@ -255,6 +266,10 @@ export class UIOverlay {
   }
 
   private bind(): void {
+    (this.el.difficulty as HTMLSelectElement).addEventListener("change", (e) => {
+      this.ctrl.setDifficulty((e.target as HTMLSelectElement).value as Difficulty);
+      this.audio.click();
+    });
     this.root.addEventListener("click", (e) => {
       const t = e.target as HTMLElement;
       const btn = t.closest("button") as HTMLButtonElement | null;

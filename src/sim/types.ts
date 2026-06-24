@@ -270,6 +270,12 @@ export interface SimConfig {
   eventInterval: number;
   /** Baseline ambient cold; the biome of the current region adds to this. */
   baseCold: number;
+  /** Stored food the tribe starts with. Defaults to 20. */
+  startingFood?: number;
+  /** Multiplier on random-event lethality (disease/predator/raid/cold). Defaults to 1. */
+  eventLethality?: number;
+  /** Additive world-abundance bonus baked into every tick. Defaults to 0. */
+  abundanceBonus?: number;
   /** Region the tribe starts in (defaults to the tundra homeland). */
   startRegion?: string;
   /** Roguelite carry-over: small additive genome bonus for founders. */
