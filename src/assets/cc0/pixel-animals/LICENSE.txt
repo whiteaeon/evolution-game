@@ -1,0 +1,13 @@
+Pixel Animals 16x16
+by GrumpyDiamond
+
+License: Creative Commons Zero (CC0 1.0, Public Domain)
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Source: https://opengameart.org/content/pixel-animals-16x16
+
+Free to use in personal, educational and commercial projects.
+Attribution is appreciated but not required.
+
+This project uses the cow (top-left 16x16 cell) and the sheep
+(top-right 16x16 cell) from Animals.png.

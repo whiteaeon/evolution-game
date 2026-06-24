@@ -1,0 +1,38 @@
+{
+  "taskId": "art-cc0-integration",
+  "claim": "The renderer's biome ground, decor, structures, animals, food and hearth are now sourced from real CC0 pixel-art packs (Kenney Roguelike/RPG + CC0 farm animals), baked behind the existing texture-key indirection so MainScene.ts and the sim are byte-for-byte unchanged; only the hominin era-morph stays hand-authored.",
+  "whatChanged": {
+    "modified": [
+      "src/game/textures.ts — make{Biome,Decor,Animal,Shelter,Fire}Textures() now blit CC0 pixels (new `blit` helper) instead of hand-drawing; the hominin morph (ensureHomininTexture) is left intact. Function signatures and texture keys are unchanged.",
+      "README.md — rewrote the Art section with a CC0 attribution table, updated the intro/architecture/future-work notes."
+    ],
+    "added": [
+      "src/game/art-cc0-data.ts — GENERATED: raw base64 RGBA of every final sprite + CC0_GROUPS key lists.",
+      "src/game/art-cc0-data.test.ts — 3 specs pinning the data contract (all keys present; base64 decodes to w*h*4 RGBA).",
+      "src/assets/cc0/** — the CC0 source files actually used + their per-pack licences + CREDITS.md.",
+      "tools/extract-cc0-art.py — one-off tool that slices/recolours/composites the sources into art-cc0-data.ts (requires Pillow)."
+    ],
+    "unchanged": [
+      "src/game/MainScene.ts (zero diff)",
+      "src/sim/** (zero diff)"
+    ]
+  },
+  "cc0Sources": [
+    { "pack": "Kenney Roguelike/RPG pack", "author": "Kenney", "license": "CC0 1.0", "url": "https://kenney.nl/assets/roguelike-rpg-pack", "usedFor": "biome ground, trees/bush/rock, tents & buildings (5 shelters), farmland/crop, food, hearth/fire" },
+    { "pack": "Pixel Animals 16x16", "author": "GrumpyDiamond", "license": "CC0 1.0", "url": "https://opengameart.org/content/pixel-animals-16x16", "usedFor": "cow, sheep" },
+    { "pack": "Dog Sprites", "author": "Shepardskin", "license": "CC0 1.0", "url": "https://opengameart.org/content/dog-sprites", "usedFor": "dog" }
+  ],
+  "howVerified": {
+    "npm run build": "pass (tsc --noEmit + vite build, exit 0)",
+    "npm test": "pass (37/37; was 34, +3 new data-contract specs)",
+    "npm run sim": "pass — autopilot reaches the Information Age at year 485, generation 24 (within the expected ~450-490)",
+    "art": "every extracted sprite was rendered to a montage and visually inspected (tools/extract-cc0-art.py default --preview pass) before wiring; all 30 sprites and all scene-referenced keys confirmed present."
+  },
+  "honestCaveats": [
+    "Kenney has no pixel farm animals, so cow/sheep (GrumpyDiamond) and dog (Shepardskin) come from two CC0 OpenGameArt packs rather than the Kenney pack — all three are CC0.",
+    "Biome ground tiles are genuine Kenney tiles lightly recoloured per biome for distinction (tundra uses the grey cobble tile, desert the sand tile, temperate biomes the grass tile tinted toward each biome's palette).",
+    "The 5 shelters are composited from Kenney roguelike tiles (tents, building wall/roof tiles, rocks); the cave's dark mouth is a drawn ellipse over the Kenney stone.",
+    "Integration uses a generated base64-RGBA data module baked at runtime (not Phaser's async loader) specifically so the scene stays synchronous and MainScene.ts is untouched, as the acceptance requires.",
+    "Runtime rendering was validated by build/typecheck + the pre-bake sprite preview; it was not opened in a live browser in this headless run."
+  ]
+}
