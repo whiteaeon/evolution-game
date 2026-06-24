@@ -47,8 +47,13 @@ function Remove-AgentWorktree {
     # NOTE: the agent/<task> branch is intentionally KEPT for review/merge.
 }
 
-# Unified diff of everything the builder did on its branch, vs the base.
+# Everything the builder did on its branch, vs the base. We lead with `--stat`
+# so the verifier sees file *sizes* — git's unified diff shows binaries only as
+# "Binary files differ", which would hide a suspiciously tiny stub asset (e.g. a
+# 299-byte "CC0 animal pack"). The stat exposes "Bin 0 -> 299 bytes".
 function Get-WorktreeDiff {
     param([Parameter(Mandatory)] [string]$Path, [Parameter(Mandatory)] [string]$BaseBranch)
-    return (git -C $Path diff "$BaseBranch...HEAD" 2>&1 | Out-String)
+    $stat = git -C $Path diff --stat "$BaseBranch...HEAD" 2>&1 | Out-String
+    $full = git -C $Path diff "$BaseBranch...HEAD" 2>&1 | Out-String
+    return "## Changed files (sizes; 'Bin' = binary asset):`n$stat`n## Unified diff:`n$full"
 }
