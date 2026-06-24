@@ -3,13 +3,16 @@
 A self-contained agent that, once per "turn," finds the next worthwhile task,
 does it in an isolated git worktree using a headless **builder** Claude, then has
 a separate, adversarial **verifier** Claude (fresh context, sees only the diff)
-independently confirm it before anything is allowed to land. All memory lives on
-disk, so a context flush loses nothing. It runs on **Windows** (PowerShell +
-Task Scheduler) and never touches the game except through normal, verified edits.
+independently confirm it before anything is allowed to land. Approved work is
+**proposed as a GitHub PR** (never auto-merged — you review and merge). All memory
+lives on disk, so a context flush loses nothing. It runs on **Windows**
+(PowerShell + Task Scheduler) and never touches the game's `main` except through
+normal, verified, reviewable edits.
 
 This is wired for a solo creative game project — discovery is driven by the
 project's own checks and a curated backlog, not CI/issues — but the architecture
-is the classic five-move loop.
+is the classic five-move loop. It can run a **single turn**, or **continuously**
+(turns back-to-back, a PR per approved task).
 
 ---
 
@@ -27,8 +30,9 @@ DISCOVER → HANDOFF → BUILD → VERIFY → PERSIST
       audio, perf, a11y, content). Already-approved items are skipped (read from
       the ledger).
    3. **TODO/FIXME scan** of `src/**/*.ts`.
-   4. **GitHub issues** via `gh` — *optional and off*; auto-skipped when there's no
-      GitHub remote (this project has none, so it runs fully locally).
+   4. **GitHub issues** via `gh` — *optional and off* (`EnableGhDiscovery`). The
+      repo does have a GitHub remote, but it's used only for **opening PRs**, not as
+      a discovery source, unless you turn this on.
 2. **HANDOFF** (`lib/worktree.ps1`) — create a git **worktree** on a fresh
    `agent/<task>` branch. Worktrees share the one `.git` (cheap, parallel-safe).
    `node_modules` is **junctioned** in from the main checkout so the builder and
@@ -49,9 +53,11 @@ DISCOVER → HANDOFF → BUILD → VERIFY → PERSIST
    - **Final verdict = objective passes AND verifier approves.** Either can veto.
 5. **PERSIST** (`lib/persist.ps1`) — append the outcome to the on-disk ledger,
    write a per-turn artifact dir (diff, reports, logs, verdict), and handle the
-   branch: **approved work stays on `agent/<task>`** for your review (it is *not*
-   merged unless you turn on `AutoMerge`). The worktree is removed; the branch and
-   all artifacts are kept.
+   branch. With **`PushPR` on (default)** approved work is pushed and a **PR is
+   opened** vs `main` (`gh pr create`) — still human-gated, you merge it. With
+   `PushPR` off it just **stays on `agent/<task>`** for local review. Either way it
+   is *never* auto-merged unless you explicitly set `AutoMerge`. The worktree is
+   removed; the branch, PR, and all artifacts are kept.
 
 The verifier's **asymmetry is the point**: different process, fresh context,
 diff-only view, default-no. It's a real gate, not a rubber stamp.
@@ -75,58 +81,78 @@ touched) and the verifier still runs the **real** objective checks and applies t
 AND-gate — so the discover→worktree→build→verify→persist pipeline is genuinely
 exercised without spending any Claude calls.
 
-Continuous (manual; the scheduler normally drives single turns instead):
+**Continuous** — turns back-to-back: after each turn it waits `InterTurnSec` (10s)
+and starts the next; when the backlog is exhausted (or a turn errors) it backs off
+for `IdleMinutes` (30m) before checking again. A **lockfile**
+(`state/loop.lock`) guarantees only one continuous loop ever runs.
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File agent-loop\loop.ps1 -Continuous -IntervalMinutes 60 -MaxTurns 0
+powershell -NoProfile -ExecutionPolicy Bypass -File agent-loop\loop.ps1 -Continuous -MaxTurns 0
 ```
+
+Normally you don't launch this by hand — the scheduled task keeps it alive (below).
 
 ---
 
-## Enable / disable the timer (Windows Task Scheduler)
+## The scheduled task (Windows Task Scheduler)
 
-The scheduler is **not installed by this build**, and the register script creates
-the task **DISABLED** so it can't fire unattended Claude turns until you say so.
+One task, `EvolutionGameAgentLoop`, in two flavors:
 
 ```powershell
-# Register (created DISABLED). Pick your cadence.
-powershell -ExecutionPolicy Bypass -File agent-loop\scheduler\register-task.ps1 -IntervalMinutes 120
+# CONTINUOUS (current setup): a 15-min "heartbeat" that keeps ONE long-lived
+# loop.ps1 -Continuous alive — relaunching it within 15 min if it dies or after a
+# reboot (StartWhenAvailable). The lockfile means the heartbeat never double-runs.
+powershell -ExecutionPolicy Bypass -File agent-loop\scheduler\register-task.ps1 -Continuous -Enable
 
-# Turn it ON when you're ready (this is the moment real, billed turns begin):
-Enable-ScheduledTask  -TaskName 'EvolutionGameAgentLoop'
+# SINGLE-TURN cadence instead (one turn every N minutes):
+powershell -ExecutionPolicy Bypass -File agent-loop\scheduler\register-task.ps1 -IntervalMinutes 120 -Enable
 
-# Pause it any time:
+# Pause (stop future restarts) / resume / remove:
 Disable-ScheduledTask -TaskName 'EvolutionGameAgentLoop'
-
-# Remove it entirely:
+Enable-ScheduledTask  -TaskName 'EvolutionGameAgentLoop'
 powershell -ExecutionPolicy Bypass -File agent-loop\scheduler\unregister-task.ps1
+
+# Stop a continuous loop that's running RIGHT NOW (Disable stops the heartbeat;
+# this also kills the in-flight process):
+Disable-ScheduledTask -TaskName 'EvolutionGameAgentLoop'
+Stop-Process -Id (Get-Content agent-loop\state\loop.lock) -Force
 ```
 
-Scheduled runs append output to `agent-loop/state/results/scheduler.log`. The task
-runs as you (logged-on), so `node`, `npm`, `git`, and `claude` must be on **your**
-PATH. (If you prefer, register with `-Enable` to register-and-enable in one step.)
+Notes:
+- Drop `-Enable` to register **disabled** (it won't fire until you `Enable-ScheduledTask`).
+- The register script **unregisters then re-registers** (a `-Force` in-place
+  overwrite can fail with *Access is denied*). Continuous deliberately uses a
+  **time-trigger heartbeat + finite limit** rather than an `AtLogOn` / infinite-limit
+  trigger, because those can require an **elevated** (admin) PowerShell to register.
+- Runs as you (logged-on), so `node`, `npm`, `git`, `gh`, and `claude` must be on
+  **your** PATH — `loop.ps1` re-composes PATH from the registry at startup to be safe.
+- Output appends to `agent-loop/state/results/scheduler.log` (note: that file ends
+  up UTF-16; the **ledger** `state/ledger.jsonl` is clean UTF-8 and is the better
+  thing to tail).
 
 ---
 
 ## Safety & cost
 
-- **Merges are human-gated by default.** Approved work lands on an `agent/<task>`
-  branch and stops. Review with `git log agent/<task>`, `git diff main...agent/<task>`,
-  then merge yourself. Set `$AutoMerge = $true` in `config.ps1` only if you want
-  approved turns auto-merged into the main branch.
-- **The scheduler ships OFF.** Nothing recurs until you `Enable-ScheduledTask`.
-- **`--dangerously-skip-permissions` (a.k.a. `bypassPermissions`)** is used for the
-  headless builder/verifier so they can edit files and run commands without
-  interactive prompts. That is real power running unattended on your machine — only
-  enable the timer if you accept that, and keep `AutoMerge` off so a bad change
-  can't reach your main branch on its own. The worktree isolation + default-reject
-  verifier + branch gating are the safety net.
-- **Every real turn spends Claude calls** — one builder **and** one verifier
-  invocation (the verifier may also re-run checks). A timer firing every N minutes
-  spends that every N minutes. Budget accordingly; start with a long interval.
-- The verifier's objective half is deterministic and independent of the Claude
-  verdict, so even a lenient model can't approve a red build, a broken sim, a
-  gutted test, or a sim/render-split violation.
+- **Merges stay human-gated.** Approved work is proposed as a **PR** (or left on a
+  local `agent/<task>` branch if `PushPR` is off) — *you* review and merge on
+  GitHub. It is never auto-merged unless you explicitly set `$AutoMerge = $true` in
+  `config.ps1`. A PR is review, not landing.
+- **PRs go to a real, currently-public repo.** Pushing publishes code to
+  `github.com/whiteaeon/evolution-game`. Set `$PushPR = $false` to keep everything
+  local, or make the repo private on GitHub if you'd rather it not be public.
+- **`--dangerously-skip-permissions`** lets the headless builder/verifier edit
+  files and run commands without prompts — real power running unattended. The
+  safety net is worktree isolation + the default-reject verifier + the deterministic
+  objective checks + PR (not merge) gating.
+- **The verifier's objective half is deterministic** and independent of the Claude
+  verdict, so even a lenient model can't approve a red build, a broken sim, a gutted
+  test, or a sim/render-split violation.
+- **Cost — continuous is a burst.** Every turn spends a **builder + a verifier**
+  Claude call. Running continuously churns the whole backlog in a few hours (a PR
+  each), then idles. On a subscription that draws down your usage limits fast and
+  can crowd out your own work — watch it, raise `IdleMinutes`, switch to the
+  single-turn interval, or `Disable-ScheduledTask` when you've had enough.
 
 ---
 
@@ -139,14 +165,19 @@ agent-loop/
   run-turn.cmd               convenience launcher (sets exec policy)
   lib/  common discover worktree build verify persist   (.ps1 each)
   prompts/  builder.md  verifier.md                     (tuned for this game)
-  scheduler/  register-task.ps1  unregister-task.ps1     (disabled by default)
+  scheduler/  register-task.ps1  unregister-task.ps1     (single-turn or -Continuous)
   state/
     tasks/backlog.json       curated, prioritized work (tracked seed)
-    ledger.jsonl             append-only record of every turn (gitignored)
+    ledger.jsonl             append-only record of every turn incl. PR URL (gitignored)
+    loop.lock                PID of the running continuous loop (single-instance guard)
     results/<turn>/          per-turn artifacts: diff.patch, *-report.json,
                              builder.log, verifier.log, verdict.json, turn.json
+    results/scheduler.log    scheduled-task output (UTF-16)
   SCRATCH.md                 mock dry-run target (keeps the game untouched)
 ```
+
+Each ledger line records the turn's `approved`, `reason`, `branch`, and (when a PR
+was opened) its `pr` URL — so the ledger doubles as your PR/audit trail.
 
 Worktrees are created **outside** the repo at `..\evolution-agent-worktrees\<task>`
 so git never nests them. The `agent/<task>` branches live in the repo's `.git`.
@@ -157,12 +188,15 @@ so git never nests them. The `agent/<task>` branches live in the repo's `.git`.
 
 - **Required:** `node`, `npm`, `git` (the loop checks and errors clearly if any are
   missing). No `jq` — JSON is handled natively in PowerShell.
-- **For real turns:** the **Claude CLI** (`claude`) on PATH. If it's missing, run
-  with `-Mock`; the loop will refuse a real turn and tell you what to install.
+- **For real turns:** the **Claude CLI** (`claude`) on PATH, authenticated
+  (`claude auth login`). If it's missing the loop refuses a real turn and says so;
+  run with `-Mock` to exercise the wiring without any Claude calls.
+- **For PRs (`PushPR`):** a git **remote** + the **`gh` CLI** authed (`gh auth
+  status`). Without them, approved work just stays on its local branch.
 - **Git is required** (worktrees). If `evolution-game` isn't a repo yet, run
   `git init` there first (a one-time, additive step that changes no game files).
-- Tunables (model, interval, sane sim-year band, `AutoMerge`, timeouts) live in
-  `config.ps1`.
+- Tunables (model, `PushPR`/`PrBase`, `InterTurnSec`/`IdleMinutes`, sane sim-year
+  band, `AutoMerge`, timeouts) live in `config.ps1`.
 
 ---
 

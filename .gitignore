@@ -9,6 +9,7 @@ dist/
 # agent-loop runtime memory (the seed backlog IS tracked; these are per-run state)
 agent-loop/state/results/
 agent-loop/state/ledger.jsonl
+agent-loop/state/loop.lock
 
 # os / editor
 Thumbs.db

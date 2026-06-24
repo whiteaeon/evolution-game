@@ -78,7 +78,7 @@ catch {
     throw
 }
 
-$mode = if ($Continuous) { 'CONTINUOUS (at logon, back-to-back)' } else { "every $IntervalMinutes min" }
+$mode = if ($Continuous) { 'CONTINUOUS (15-min heartbeat keep-alive, turns back-to-back)' } else { "every $IntervalMinutes min" }
 if ($Enable) {
     Enable-ScheduledTask -TaskName $TaskName | Out-Null
     Write-Host "Registered AND ENABLED '$TaskName' — $mode. It will spend real Claude turns." -ForegroundColor Yellow
