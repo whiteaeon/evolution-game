@@ -1,0 +1,9 @@
+{
+  "taskId": "art-hominin-morph-polish",
+  "claim": "Refined the per-era hominin morph in src/game/textures.ts with directional shading (lit/shaded head sides, torso shadow column, leg lit edges, two-tone cloth dither, hair/hat sheen), a chin-shadow that rounds the silhouette, and crisper tool highlights; added a subtle 2-frame walk by baking a second frame `${morphKey}_1` (legs swing apart, arms swing opposite) and alternating frames in MainScene via a staggered walkPhase timer, so each morph still bakes textures keyed by its morph signature.",
+  "filesChanged": ["src/game/textures.ts", "src/game/MainScene.ts"],
+  "ranTests": true,
+  "ranBuild": true,
+  "ranSim": false,
+  "notes": "No changes to src/sim — sim/render split intact and balance unaffected, so npm run sim was not run. Both frames derive from morphKey(p): base texture key is unchanged and still deduped; `${key}_1` is frame B of the same morph. Walk frames alternate every 260ms, staggered by sprite index so the tribe isn't in lockstep. npm test (34 passing) and npm run build (tsc + vite) both pass. Visible improvement: each era sprite reads as a shaded, rounded figure that walks with a 2-step leg/arm cycle instead of a flat static slab."
+}

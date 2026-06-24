@@ -59,6 +59,8 @@ export class MainScene extends Phaser.Scene {
   private currentBiome: Biome | null = null;
   private clock = 0;
   private fireTimer = 0;
+  private walkTimer = 0;
+  private walkPhase = 0;
   private lastLogLen = 0;
 
   constructor() {
@@ -146,7 +148,7 @@ export class MainScene extends Phaser.Scene {
     this.syncFarm(s.knowledge.has("agriculture"));
     this.syncAnimals(s.knowledge.has("animalDomestication"));
     this.syncFood(s.resources.food);
-    this.syncTribe();
+    this.syncTribe(dt);
     this.syncWeather(s.world.cold, dt);
     this.syncEvents();
   }
@@ -221,7 +223,13 @@ export class MainScene extends Phaser.Scene {
     };
   }
 
-  private syncTribe(): void {
+  private syncTribe(dt: number): void {
+    this.walkTimer += dt;
+    if (this.walkTimer > 260) {
+      this.walkTimer = 0;
+      this.walkPhase ^= 1; // flip the global walk-cycle frame
+    }
+
     const living = this.ctrl.sim.living;
     const shown = living.slice(0, MAX_SPRITES);
     const seen = new Set<number>();
@@ -240,10 +248,10 @@ export class MainScene extends Phaser.Scene {
         view = { sprite, anchorX, anchorY, tx: anchorX, ty: anchorY, morph: key };
         this.tribe.set(ind.id, view);
       }
-      if (view.morph !== key) {
-        view.sprite.setTexture(key);
-        view.morph = key;
-      }
+      view.morph = key;
+      // 2-frame walk; stagger by index so the tribe doesn't step in lockstep.
+      const frameKey = (this.walkPhase + idx) & 1 ? `${key}_1` : key;
+      if (view.sprite.texture.key !== frameKey) view.sprite.setTexture(frameKey);
 
       const childScale = ind.age < this.ctrl.sim.config.reproMinAge ? 0.55 + (ind.age / 15) * 0.45 : 1;
       view.sprite.setScale(Math.min(1, childScale));
