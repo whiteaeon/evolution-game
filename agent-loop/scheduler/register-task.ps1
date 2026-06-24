@@ -57,8 +57,23 @@ else {
     $desc = "Dawn of the Tribe autonomous build/improve loop (one turn per interval)."
 }
 
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
-    -Description $desc -Force | Out-Null
+# Unregister any existing task first — a fresh Register is more reliable than a
+# `-Force` overwrite, which can fail with "Access is denied" (0x80070005) when the
+# existing task can't be modified in place.
+$existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+if ($existing) {
+    try { Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Out-Null } catch {}
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
+}
+try {
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
+        -Description $desc -ErrorAction Stop | Out-Null
+}
+catch {
+    Write-Host "Register-ScheduledTask FAILED: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "If this is 'Access is denied', run this script from an ELEVATED PowerShell (Run as administrator)." -ForegroundColor Yellow
+    throw
+}
 
 $mode = if ($Continuous) { 'CONTINUOUS (at logon, back-to-back)' } else { "every $IntervalMinutes min" }
 if ($Enable) {
