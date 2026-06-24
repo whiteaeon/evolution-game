@@ -110,12 +110,14 @@ function Invoke-ClaudeHeadless {
         [int]$TimeoutSec = 1200,
         [string]$LogFile
     )
-    $args = @('-p', $Prompt, '--model', $script:Model) + $script:ClaudeExtraArgs
+    # Pass the prompt via STDIN, not as a CLI arg. Under Windows PowerShell 5.1 a
+    # long multi-line `-p "<prompt>"` argument gets mangled when it contains tokens
+    # like `--noEmit` (e.g. from an embedded diff), which then leak as claude CLI
+    # flags ("unknown option"). Piping the prompt to stdin keeps it 100% literal.
+    $args = @('-p', '--model', $script:Model) + $script:ClaudeExtraArgs
     Push-Location $Cwd
     try {
-        # Pipe $null into stdin so `claude -p` doesn't stall ~3s waiting for input
-        # in headless mode (it takes the prompt from -p, not stdin).
-        $out = $null | & $script:ClaudeCmd @args 2>&1 | Out-String
+        $out = $Prompt | & $script:ClaudeCmd @args 2>&1 | Out-String
     } finally { Pop-Location }
     if ($LogFile) { $out | Out-File -FilePath $LogFile -Encoding utf8 }
     return $out
