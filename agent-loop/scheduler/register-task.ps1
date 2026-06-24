@@ -13,14 +13,17 @@
   README "Safety & cost" section before enabling.
 
   Usage:
+      # one turn every N minutes:
       powershell -ExecutionPolicy Bypass -File register-task.ps1 [-IntervalMinutes 120] [-Enable]
+      # or one long-lived loop, turns back-to-back, kept alive by a 15-min heartbeat:
+      powershell -ExecutionPolicy Bypass -File register-task.ps1 -Continuous [-Enable]
 #>
 [CmdletBinding()]
 param(
     [int]$IntervalMinutes = 120,
     [string]$TaskName = 'EvolutionGameAgentLoop',
     [switch]$Enable,       # opt-in: enable immediately (default leaves it disabled)
-    [switch]$Continuous    # run ONE long-lived loop (turns back-to-back) starting at logon
+    [switch]$Continuous    # run ONE long-lived loop (turns back-to-back), kept alive by a 15-min heartbeat
 )
 
 $agentRoot = Split-Path -Parent $PSScriptRoot
