@@ -317,21 +317,36 @@ export class Simulation {
   }
 
   /**
-   * Cached snapshot of the living individuals, rebuilt lazily. The full
-   * individuals array grows with every birth and is filtered many times per
-   * tick, so we keep one filtered list and invalidate it whenever the living
-   * set changes (births, deaths, migration). Behaviour is identical to the old
-   * per-call filter: callers never mutate the returned array in place.
+   * Incrementally-maintained snapshot of the living individuals. The full
+   * individuals array grows with every birth and retains the dead forever, and
+   * it is read many times per tick, so rebuilding the filtered list by scanning
+   * the whole (ever-growing) array was the dominant late-game cost. Instead we
+   * keep one living array and patch it in place: newly appended individuals are
+   * absorbed from the tail (births/interbreeding only ever append), and a death
+   * flag triggers an O(living) compaction — never an O(total-retained) rescan.
+   * Behaviour is identical to the old per-call filter: the returned array holds
+   * exactly the alive individuals in insertion order, and callers never mutate
+   * it in place.
    */
-  private livingCache: Individual[] | null = null;
+  private livingCache: Individual[] = [];
+  private livingSeen = 0;
+  private livingHasDead = false;
 
   private invalidateLiving(): void {
-    this.livingCache = null;
+    this.livingHasDead = true;
   }
 
   get living(): Individual[] {
-    if (this.livingCache === null) {
-      this.livingCache = this.state.individuals.filter((i) => i.alive);
+    const all = this.state.individuals;
+    if (this.livingSeen < all.length) {
+      for (let i = this.livingSeen; i < all.length; i++) {
+        if (all[i].alive) this.livingCache.push(all[i]);
+      }
+      this.livingSeen = all.length;
+    }
+    if (this.livingHasDead) {
+      this.livingCache = this.livingCache.filter((i) => i.alive);
+      this.livingHasDead = false;
     }
     return this.livingCache;
   }
@@ -740,14 +755,20 @@ export class Simulation {
     let pop = this.living.length;
     const foodSecurity = clamp01(s.resources.food / (pop * 2 + 1));
 
+    // Fitness is constant across the loop (nothing it reads is mutated here), so
+    // compute each pool's weights once instead of re-scanning per birth — the
+    // old per-call map made selection O(females²) at large populations.
+    const { weights: femaleWeights, total: femaleTotal } = this.fitnessWeights(females, e);
+    const { weights: maleWeights, total: maleTotal } = this.fitnessWeights(males, e);
+
     for (let n = 0; n < females.length; n++) {
       if (pop >= capacity) break;
       if (s.resources.food < BALANCE.birthFoodCost) break;
-      const mother = this.selectByFitness(females, e);
+      const mother = this.pickByWeights(females, femaleWeights, femaleTotal);
       const pBirth = 0.85 * e.birthMult * mother.health * (0.45 + 0.55 * foodSecurity);
       if (!this.rng.chance(pBirth)) continue;
 
-      const father = this.selectByFitness(males, e);
+      const father = this.pickByWeights(males, maleWeights, maleTotal);
       const childGenome = inherit(mother.genome, father.genome, this.rng, this.config.mutationRate);
       const child = this.makeIndividual(
         childGenome,
@@ -779,10 +800,17 @@ export class Simulation {
     return this.carryingCapacity(e) * BALANCE.foodStoragePerCapacity;
   }
 
-  private selectByFitness(pool: Individual[], e: Required<TechEffects>): Individual {
+  private fitnessWeights(
+    pool: Individual[],
+    e: Required<TechEffects>,
+  ): { weights: number[]; total: number } {
     const weights = pool.map((m) => this.fitness(m, e));
     let total = 0;
     for (const w of weights) total += w;
+    return { weights, total };
+  }
+
+  private pickByWeights(pool: Individual[], weights: number[], total: number): Individual {
     let r = this.rng.next() * total;
     for (let i = 0; i < pool.length; i++) {
       r -= weights[i];
