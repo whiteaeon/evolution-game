@@ -8,8 +8,8 @@ connected **Information-Age** civilization — watching them evolve **biological
 **geographically** (where the tribe lives shapes what survives). Reaching the
 **Information Age** wins.
 
-Stardew-ish warm pixel aesthetic, all art generated programmatically (no asset
-downloads required).
+Stardew-ish warm pixel aesthetic, drawn from public-domain (CC0) pixel-art packs
+behind a texture-key indirection (see *Art* below).
 
 ---
 
@@ -70,7 +70,8 @@ src/
   game/                ← Phaser render layer (reads sim state, never owns it)
     controller.ts      owns the Simulation; paces ticks; save/load; roguelite legacy
     legacy.ts          pure legacy/meta helpers + localStorage IO
-    textures.ts        programmatic pixel art: biomes, shelters, animals, the era morph
+    textures.ts        bakes CC0 art (biomes, shelters, animals…) + the hand-drawn era morph
+    art-cc0-data.ts    generated: raw pixels of the CC0 source art (see Art below)
     palette.ts         colors
     MainScene.ts       biome tiles, decor, shelters, farms, animals, sprites, weather
   ui/                  ← DOM overlay (also reads sim state via the controller)
@@ -198,23 +199,38 @@ persistent **legacy** that grants the next tribe a small, capped founder bonus.
 
 ## Art
 
-All art is **hand-authored programmatic pixel art** generated at runtime in
-`textures.ts` — no external assets are downloaded or bundled, so `npm install`
-alone produces the full look, and there is nothing to attribute.
+The world art — **biome ground, decor (trees/bush/rock), structures (the
+cave→hut→village→town→city ladder), animals, food and the hearth** — is sourced
+from **public-domain (CC0)** pixel-art packs. The only hand-authored art is the
+**hominin era-morph** (`textures.ts` `ensureHomininTexture`): a nine-stage human
+that ages from archaic to modern with era clothing, headwear, held tool and
+lineage skin tint — there is no CC0 equivalent for it, so it stays hand-drawn.
 
-Network access *was* available, but real CC0 packs (Kenney et al.) were not
-integrated, for two reasons: (1) the centrepiece — a hominin that morphs across
-nine eras (Homo-erectus-ish → modern, with era-appropriate clothing and tools) —
-has no CC0 equivalent and must be hand-authored regardless; and (2) blind-slicing
-a downloaded atlas without visual iteration risks an incoherent result. So the art
-was instead **substantially upgraded by hand**: a larger, shaded 9-stage human
-morph (body, posture, brow, era clothing, headwear, held tool, lineage skin
-tint), six distinct biome tilesets, five shelter tiers (cave→city), animals and
-crops, and the map/family/tech UI.
+### Attribution
 
-The swap point is preserved: the scene only ever references **texture keys**, so
-dropping in a CC0/Kenney spritesheet is a `textures.ts`-only change. That remains
-the recommended next polish step.
+| Pack | Author | License | Used for |
+| --- | --- | --- | --- |
+| [Roguelike/RPG pack](https://kenney.nl/assets/roguelike-rpg-pack) | Kenney | CC0 1.0 | biome ground, trees/bush/rock, tents & buildings, farmland/crop, food, hearth |
+| [Pixel Animals 16x16](https://opengameart.org/content/pixel-animals-16x16) | GrumpyDiamond | CC0 1.0 | cow, sheep |
+| [Dog Sprites](https://opengameart.org/content/dog-sprites) | Shepardskin | CC0 1.0 | dog |
+
+All three are [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)
+(public domain). The source files and their per-pack licences live in
+`src/assets/cc0/` (see `src/assets/cc0/CREDITS.md`).
+
+### How it's wired (the swap point held)
+
+The renderer cannot decode PNGs synchronously at scene-create time, so a one-off
+tool (`tools/extract-cc0-art.py`, requires Pillow) slices / recolours /
+composites the CC0 sources into the final sprites and bakes their raw pixels into
+`src/game/art-cc0-data.ts`. At runtime `textures.ts` blits that data into Phaser
+canvas textures **under the same stable texture keys** the scene already used —
+so **`MainScene.ts` did not change at all**, and re-skinning the game stays a
+`textures.ts`-only swap. To regenerate after changing the mapping or sources:
+
+```bash
+python tools/extract-cc0-art.py --emit
+```
 
 ---
 
@@ -230,7 +246,7 @@ the recommended next polish step.
   population is uncapped and shown in the stats/graph. The family-tree ancestor
   view caps drawn depth and lets you *climb* (re-focus on an ancestor) to go deeper.
 - **Audio** is minimal synthesized blips/chimes (off by default), not a score.
-- **Future work:** drop in a true CC0 art pack; richer map play (fog of war,
+- **Future work:** richer map play (fog of war,
   per-region resources you carry, simultaneous tribes); a descendant/whole-graph
   family view (today's view is ancestry-focused); deeper domestication
   (individual crops/animals); and richer, choice-driven event chains.

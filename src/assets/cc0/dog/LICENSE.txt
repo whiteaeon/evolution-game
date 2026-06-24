@@ -1,0 +1,13 @@
+Dog Sprites
+by Shepardskin
+
+License: Creative Commons Zero (CC0 1.0, Public Domain)
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Source: https://opengameart.org/content/dog-sprites
+
+Free to use in personal, educational and commercial projects.
+Attribution is appreciated but not required.
+
+dog_sit.png is the first frame of the original "dog_sit" animation
+(dog_sitx1.gif), exported losslessly to PNG. It is used as the camp dog.

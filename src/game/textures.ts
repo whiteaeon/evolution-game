@@ -1,15 +1,33 @@
 import Phaser from "phaser";
 import { SKIN, HAIR } from "./palette.js";
-import type { Biome, Lineage } from "../sim/index.js";
+import type { Lineage } from "../sim/index.js";
+import { CC0_ART, CC0_GROUPS } from "./art-cc0-data.js";
 
 /**
- * All art is generated programmatically (no external assets) so the slice runs
- * with `npm install` alone. Each draw routine paints into an offscreen Graphics
- * and bakes a texture; the scene only ever references texture keys, so a real
- * CC0/Kenney spritesheet can be swapped in later without touching the scene.
+ * Biomes, decor, structures, animals, food and the hearth are sourced from
+ * public-domain (CC0) pixel-art packs — Kenney's Roguelike/RPG pack plus CC0
+ * farm animals (see src/assets/cc0/CREDITS.md). Their pixels are baked here into
+ * Phaser canvas textures under stable texture keys, so the scene never references
+ * an asset directly. The only hand-authored art is the hominin era-morph below,
+ * for which no CC0 equivalent exists; it is still painted into a Graphics and
+ * baked the same way, behind the same key indirection.
  */
 
 type G = Phaser.GameObjects.Graphics;
+
+/** Bake one CC0 sprite (raw base64 RGBA) into a canvas texture under `key`. */
+function blit(scene: Phaser.Scene, key: string): void {
+  if (scene.textures.exists(key)) return;
+  const sprite = CC0_ART[key];
+  if (!sprite) return;
+  const tex = scene.textures.createCanvas(key, sprite.w, sprite.h);
+  if (!tex) return;
+  const bin = atob(sprite.data);
+  const buf = new Uint8ClampedArray(sprite.w * sprite.h * 4);
+  for (let i = 0; i < buf.length; i++) buf[i] = bin.charCodeAt(i);
+  tex.context.putImageData(new ImageData(buf, sprite.w, sprite.h), 0, 0);
+  tex.refresh();
+}
 
 function px(g: G, color: number, x: number, y: number, w = 1, h = 1, alpha = 1): void {
   g.fillStyle(color, alpha);
@@ -29,195 +47,31 @@ const lighten = (c: number, amt: number) => Phaser.Display.Color.IntegerToColor(
 
 export const TILE = 16;
 
-// ── biome ground ─────────────────────────────────────────────────────────────
-
-interface BiomeTheme {
-  grass: number;
-  grassDark: number;
-  grassAlt: number;
-  dirt: number;
-  dirtDark: number;
-}
-const BIOME_THEME: Record<Biome, BiomeTheme> = {
-  tundra: { grass: 0x9fb6a8, grassDark: 0x83a08f, grassAlt: 0xc3d4cb, dirt: 0xb9a98f, dirtDark: 0x9d8d74 },
-  forest: { grass: 0x5f9a4f, grassDark: 0x457a39, grassAlt: 0x74b35f, dirt: 0x7d5a38, dirtDark: 0x644624 },
-  river: { grass: 0x6fae55, grassDark: 0x4f8c3f, grassAlt: 0x86c267, dirt: 0xa98a5a, dirtDark: 0x8c7148 },
-  grassland: { grass: 0x9fbf5e, grassDark: 0x82a345, grassAlt: 0xbcd277, dirt: 0xc2a06a, dirtDark: 0xa5824f },
-  desert: { grass: 0xd9c27e, grassDark: 0xc2a85f, grassAlt: 0xeedda0, dirt: 0xd2b06a, dirtDark: 0xba9450 },
-  coast: { grass: 0x86c08f, grassDark: 0x66a070, grassAlt: 0xa7d6ad, dirt: 0xccb98a, dirtDark: 0xae9c6c },
-};
-
-const speckleSpots = [
-  [2, 3], [9, 2], [5, 7], [12, 9], [3, 11], [8, 13], [13, 5], [6, 1],
-];
+// ── CC0-sourced art (biomes, decor, animals, shelters, hearth) ────────────────
+// Every key below is baked from the CC0 packs in src/assets/cc0/ (see CREDITS.md)
+// via the generated art-cc0-data.ts. The scene references only these keys.
 
 export function makeBiomeTextures(scene: Phaser.Scene): void {
-  for (const biome of Object.keys(BIOME_THEME) as Biome[]) {
-    const t = BIOME_THEME[biome];
-    bake(scene, `grass-${biome}`, TILE, TILE, (g) => {
-      px(g, t.grass, 0, 0, TILE, TILE);
-      speckleSpots.forEach(([x, y], i) => px(g, i % 2 ? t.grassDark : t.grassAlt, x, y, 2, 1));
-    });
-    bake(scene, `dirt-${biome}`, TILE, TILE, (g) => {
-      px(g, t.dirt, 0, 0, TILE, TILE);
-      speckleSpots.forEach(([x, y], i) => px(g, i % 2 ? t.dirtDark : t.dirt, x, y, 2, 1));
-    });
-  }
-  // farmland + crop for the agricultural eras
-  bake(scene, "farmland", TILE, TILE, (g) => {
-    px(g, 0x8a6038, 0, 0, TILE, TILE);
-    for (let r = 2; r < TILE; r += 4) px(g, 0x6f4a2a, 0, r, TILE, 2);
-  });
-  bake(scene, "crop", TILE, TILE, (g) => {
-    px(g, 0x8a6038, 0, 0, TILE, TILE);
-    for (let r = 2; r < TILE; r += 4) px(g, 0x6f4a2a, 0, r, TILE, 2);
-    for (let c = 2; c < TILE; c += 4) {
-      px(g, 0x4f8f3a, c, 4, 1, 8);
-      px(g, 0xd9c24b, c - 1, 3, 3, 2);
-    }
-  });
+  for (const key of CC0_GROUPS.biome) blit(scene, key);
 }
-
-// ── decor & resources ─────────────────────────────────────────────────────────
 
 export function makeDecorTextures(scene: Phaser.Scene): void {
-  bake(scene, "tree", 18, 22, (g) => {
-    px(g, 0x6e472d, 8, 15, 3, 7);
-    px(g, 0x8a5a3b, 8, 15, 1, 7);
-    px(g, 0x3c7038, 3, 3, 12, 11);
-    px(g, 0x4f8f4a, 4, 2, 10, 9);
-    px(g, 0x66a85e, 5, 3, 6, 4);
-  });
-  bake(scene, "pine", 16, 24, (g) => {
-    px(g, 0x5a3b25, 7, 18, 2, 6);
-    px(g, 0x2f5d35, 3, 3, 10, 6);
-    px(g, 0x356a3c, 2, 8, 12, 6);
-    px(g, 0x2f5d35, 1, 13, 14, 5);
-  });
-  bake(scene, "rock", 14, 11, (g) => {
-    px(g, 0x6f6b66, 1, 4, 12, 7);
-    px(g, 0x9a958f, 2, 3, 9, 6);
-    px(g, 0xb6b1aa, 3, 4, 4, 2);
-  });
-  bake(scene, "bush", 16, 13, (g) => {
-    px(g, 0x3c7038, 1, 4, 14, 9);
-    px(g, 0x4f8f4a, 2, 3, 12, 8);
-    [[4, 6], [9, 5], [6, 9], [11, 8]].forEach(([x, y]) => px(g, 0xc0334d, x, y, 2, 2));
-  });
-  bake(scene, "food-berry", 12, 10, (g) => {
-    px(g, 0x6b4a2e, 1, 6, 10, 4);
-    [[2, 4], [5, 3], [8, 5], [4, 6], [7, 6]].forEach(([x, y]) => px(g, 0xc0334d, x, y, 2, 2));
-  });
-  bake(scene, "food-meat", 12, 10, (g) => {
-    px(g, 0x6b4a2e, 1, 6, 10, 4);
-    px(g, 0xc46a5a, 2, 3, 8, 4);
-    px(g, 0xd98a7a, 3, 4, 4, 1);
-  });
+  for (const key of CC0_GROUPS.decor) blit(scene, key);
 }
-
-// ── animals ──────────────────────────────────────────────────────────────────
 
 export function makeAnimalTextures(scene: Phaser.Scene): void {
-  bake(scene, "dog", 14, 10, (g) => {
-    px(g, 0x7a5232, 2, 4, 8, 4); // body
-    px(g, 0x7a5232, 9, 3, 3, 3); // head
-    px(g, 0x5a3a22, 1, 7, 2, 3); // legs
-    px(g, 0x5a3a22, 7, 7, 2, 3);
-    px(g, 0x5a3a22, 0, 4, 2, 1); // tail
-    px(g, 0x2a1a10, 10, 4, 1, 1); // eye
-  });
-  bake(scene, "sheep", 14, 11, (g) => {
-    px(g, 0xeae4da, 2, 3, 9, 5); // wool
-    px(g, 0xf6f2ea, 3, 2, 7, 3);
-    px(g, 0x4a4036, 10, 4, 3, 3); // head
-    px(g, 0x4a4036, 3, 8, 2, 3); // legs
-    px(g, 0x4a4036, 8, 8, 2, 3);
-  });
-  bake(scene, "cow", 16, 12, (g) => {
-    px(g, 0x6b4a32, 2, 3, 10, 6);
-    px(g, 0xe8e0d4, 4, 4, 3, 3); // patch
-    px(g, 0x4a3322, 11, 3, 4, 4); // head
-    px(g, 0x3a2818, 3, 9, 2, 3);
-    px(g, 0x3a2818, 9, 9, 2, 3);
-  });
+  for (const key of CC0_GROUPS.animal) blit(scene, key);
 }
-
-// ── shelters (cave → hut → village → town → city) ─────────────────────────────
 
 export function makeShelterTextures(scene: Phaser.Scene): void {
-  bake(scene, "shelter-cave", 44, 32, (g) => {
-    px(g, 0x6f6b66, 2, 6, 40, 26);
-    px(g, 0x9a958f, 4, 8, 36, 22);
-    px(g, 0x231f1c, 15, 14, 14, 16);
-    px(g, 0x3a3531, 16, 13, 12, 3);
-    px(g, 0xb6b1aa, 6, 9, 9, 3);
-  });
-  bake(scene, "shelter-hut", 44, 34, (g) => {
-    px(g, 0x6e472d, 6, 16, 32, 16);
-    px(g, 0x8a5a3b, 8, 18, 28, 13);
-    px(g, 0xc9a24b, 3, 6, 38, 12);
-    px(g, 0xb38c3a, 3, 14, 38, 3);
-    px(g, 0xd9b65e, 6, 7, 32, 4);
-    px(g, 0x2c2018, 19, 22, 8, 10);
-    px(g, 0xffd166, 30, 22, 3, 3);
-  });
-  bake(scene, "shelter-village", 56, 38, (g) => {
-    // a cluster of huts
-    const hut = (ox: number, oy: number, s: number) => {
-      px(g, 0x8a5a3b, ox, oy + 8, 16 * s, 12);
-      px(g, 0xc9a24b, ox - 1, oy, 18 * s, 9);
-      px(g, 0xb38c3a, ox - 1, oy + 7, 18 * s, 2);
-      px(g, 0x2c2018, ox + 6, oy + 12, 5, 8);
-    };
-    hut(6, 14, 1);
-    hut(30, 10, 1.1);
-    hut(20, 20, 0.9);
-    px(g, 0x7a5a3a, 0, 34, 56, 4); // packed-earth ground
-  });
-  bake(scene, "shelter-town", 64, 44, (g) => {
-    px(g, 0x8d8a85, 4, 18, 56, 26); // stone block
-    px(g, 0xa7a39d, 6, 20, 52, 8);
-    // peaked tiled roofs
-    px(g, 0xa6503c, 2, 10, 30, 10);
-    px(g, 0xa6503c, 34, 6, 28, 14);
-    px(g, 0x7e3c2c, 2, 18, 60, 2);
-    // doors & windows
-    px(g, 0x3a2a1c, 10, 30, 8, 14);
-    px(g, 0x3a2a1c, 26, 32, 7, 12);
-    px(g, 0x6fa9c9, 44, 28, 6, 6);
-    px(g, 0x6fa9c9, 52, 28, 6, 6);
-  });
-  bake(scene, "shelter-city", 72, 52, (g) => {
-    // skyline of towers
-    px(g, 0x6d7a86, 4, 20, 64, 32);
-    const tower = (ox: number, w: number, top: number, col: number) => {
-      px(g, col, ox, top, w, 52 - top);
-      for (let yy = top + 3; yy < 50; yy += 5)
-        for (let xx = ox + 1; xx < ox + w - 1; xx += 4) px(g, 0xffe08a, xx, yy, 2, 2);
-    };
-    tower(6, 14, 8, 0x5b6772);
-    tower(26, 16, 2, 0x77838f);
-    tower(48, 18, 6, 0x4f5a64);
-    px(g, 0x3a444d, 4, 48, 64, 4);
-  });
+  for (const key of CC0_GROUPS.shelter) blit(scene, key);
 }
-
-// ── hearth / fire ──────────────────────────────────────────────────────────────
 
 export function makeFireTextures(scene: Phaser.Scene): void {
-  const draw = (tall: boolean) => (g: G) => {
-    [[2, 12], [6, 13], [10, 13], [13, 12]].forEach(([x, y]) => px(g, 0x9a958f, x, y, 3, 3));
-    px(g, 0x6e472d, 4, 12, 8, 2);
-    const top = tall ? 2 : 4;
-    px(g, 0xd64933, 6, 11, 4, 3);
-    px(g, 0xff8b3d, 6, top + 2, 4, 7);
-    px(g, 0xffd166, 7, top + 3, 2, tall ? 5 : 4);
-  };
-  bake(scene, "fire-0", 16, 16, draw(true));
-  bake(scene, "fire-1", 16, 16, draw(false));
+  for (const key of CC0_GROUPS.fire) blit(scene, key);
 }
 
-// ── hominin morph (era + genome aware) ────────────────────────────────────────
+// ── hominin morph (era + genome aware) — hand-authored, no CC0 equivalent ──────
 
 export interface MorphParams {
   /** 0..5 over the era ladder; drives clothing, tools and posture. */
