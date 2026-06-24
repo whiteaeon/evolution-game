@@ -34,15 +34,18 @@ if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
 }
 
 if ($Continuous) {
-    # One long-lived process that runs turns back-to-back (loop.ps1 -Continuous),
-    # auto-started at logon, restarted if it dies, no execution-time limit.
+    # One long-lived process that runs turns back-to-back (loop.ps1 -Continuous).
+    # A time-trigger "heartbeat" (every 15 min) is the keep-alive: the single-
+    # instance lockfile means only ONE continuous loop ever runs, so each fire just
+    # confirms the loop is alive — and relaunches it within 15 min if it died (e.g.
+    # after a reboot, via StartWhenAvailable). We use a time trigger + finite limit
+    # because AtLogOn / infinite-limit settings can require elevation to register.
     $cmd = "& '$loop' -Continuous -MaxTurns 0 *>> '$log'"
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
         -Argument "-NoProfile -ExecutionPolicy Bypass -Command `"$cmd`""
-    $trigger = New-ScheduledTaskTrigger -AtLogOn
+    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 15)
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable `
-        -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 5) `
-        -MultipleInstances IgnoreNew
+        -ExecutionTimeLimit (New-TimeSpan -Days 3) -MultipleInstances IgnoreNew
     $desc = "Dawn of the Tribe autonomous loop — CONTINUOUS (turns back-to-back; PRs proposed for approved work)."
 }
 else {
