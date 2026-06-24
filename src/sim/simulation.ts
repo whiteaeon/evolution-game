@@ -15,8 +15,11 @@ import {
   TASKS,
   TRAITS,
   type Biome,
+  type ChoiceOption,
   type Encounter,
   type Era,
+  type EventChainId,
+  type PendingChoice,
   type Genome,
   type Individual,
   type Lineage,
@@ -68,6 +71,7 @@ const BALANCE = {
   encounterInterval: 28, // ticks between possible neighbouring-group encounters
   migrateFoodPerHead: 1.6, // food spent per person per unit distance travelled
   migrateRisk: 0.5, // base per-person death chance over a full-map journey
+  eventChainInterval: 37, // ticks between possible choice-driven event chains
 };
 
 interface ShelterDef {
@@ -96,6 +100,41 @@ const LINEAGE_NAME: Record<Lineage, string> = {
   denisovan: "a group of Denisovans",
 };
 
+/**
+ * Presentation for each choice-driven event chain. The trade-off logic lives in
+ * {@link Simulation.resolveChoice}; this is just the framing the UI shows. Option
+ * 0 is always the cautious choice, option 1 the risky one.
+ */
+const EVENT_CHAIN_DEF: Record<
+  EventChainId,
+  { title: string; message: string; options: [ChoiceOption, ChoiceOption] }
+> = {
+  hardWinter: {
+    title: "A hard winter",
+    message: "The cold bites deep and the stores run thin. How will the tribe endure?",
+    options: [
+      { label: "Ration the stores", hint: "spend food, no one is lost" },
+      { label: "Risk a winter hunt", hint: "more food, but the weak may not return" },
+    ],
+  },
+  sickCamp: {
+    title: "Sickness in the camp",
+    message: "A fever spreads through the band. Tend the afflicted or let it run its course?",
+    options: [
+      { label: "Tend the sick", hint: "spend food, the camp recovers" },
+      { label: "Let it run", hint: "costs nothing, but the frail may die" },
+    ],
+  },
+  rivalCache: {
+    title: "A rival's granary",
+    message: "Scouts find a neighbouring camp's food cache. Bargain for a share, or take it?",
+    options: [
+      { label: "Trade for a share", hint: "some food, no blood spilled" },
+      { label: "Raid the cache", hint: "much more food, but lives at risk" },
+    ],
+  },
+};
+
 const eraIndex = (e: Era) => ERAS.indexOf(e);
 const cap = (str: string) => str.charAt(0).toUpperCase() + str.slice(1);
 
@@ -116,6 +155,7 @@ export interface SimState {
   log: SimEvent[];
   researchTarget: TechId | null;
   pendingEncounter: Encounter | null;
+  pendingChoice: PendingChoice | null;
   /** Lifetime tallies for the chronicle / stats screens. */
   totals: { births: number; deaths: number; interbred: number };
   /** A short, human-readable description of the next objective. */
@@ -166,6 +206,7 @@ export class Simulation {
       log: [],
       researchTarget: knowledge.available()[0] ?? null,
       pendingEncounter: null,
+      pendingChoice: null,
       totals: { births: 0, deaths: 0, interbred: 0 },
       goal: "",
     };
@@ -298,6 +339,7 @@ export class Simulation {
     this.ageAndDie(effects);
     this.maybeEvent(effects);
     this.maybeEncounter();
+    this.maybeEventChain();
     this.reproduce(effects);
     this.tryUpgradeShelter();
     this.updateEraAndGeneration();
@@ -492,14 +534,17 @@ export class Simulation {
     }
   }
 
-  private applyHazard(trait: TraitName, lethality: number): void {
+  private applyHazard(trait: TraitName, lethality: number): number {
     const s = this.state;
+    let deaths = 0;
     for (const ind of this.living) {
       if (this.rng.chance(clamp01((1 - ind.genome[trait]) * lethality))) {
         ind.alive = false;
         s.totals.deaths++;
+        deaths++;
       }
     }
+    return deaths;
   }
 
   /**
@@ -556,6 +601,90 @@ export class Simulation {
     }
     s.totals.interbred++;
     this.logEvent("encounter", `Interbred with ${LINEAGE_NAME[enc.lineage]} — new blood strengthens the line.`);
+  }
+
+  /**
+   * Choice-driven event chains. Like {@link maybeEncounter}, these surface a
+   * pending decision with a trade-off that the player (or autopilot) resolves via
+   * {@link resolveChoice}; ignored, they expire. Only one decision is offered at a
+   * time so the UI never has to stack two modals.
+   */
+  private maybeEventChain(): void {
+    const s = this.state;
+    if (s.pendingChoice) {
+      if (s.tick > s.pendingChoice.expiresTick) {
+        this.logEvent("choice", `The moment to act passed — ${s.pendingChoice.title.toLowerCase()} went unanswered.`);
+        s.pendingChoice = null;
+      }
+      return;
+    }
+    if (s.pendingEncounter) return;
+    if (this.living.length < 4) return;
+    if (s.tick % BALANCE.eventChainInterval !== 0) return;
+    if (!this.rng.chance(0.5)) return;
+
+    const eligible = this.eligibleEventChains();
+    if (eligible.length === 0) return;
+    const id = this.rng.pick(eligible);
+    s.pendingChoice = { id, ...EVENT_CHAIN_DEF[id], expiresTick: s.tick + 6 };
+    this.logEvent("choice", s.pendingChoice.message);
+  }
+
+  /** Which event chains the current world state can offer right now. */
+  private eligibleEventChains(): EventChainId[] {
+    const s = this.state;
+    const out: EventChainId[] = [];
+    if (s.world.cold > 0.5) out.push("hardWinter");
+    if (this.living.length >= 8) out.push("sickCamp");
+    if (eraIndex(s.era) >= eraIndex("Bronze Age")) out.push("rivalCache");
+    return out;
+  }
+
+  /**
+   * Resolve a pending choice. Option 0 is the cautious branch (a sure cost),
+   * option 1 the risky branch (a bigger payoff at the cost of lives).
+   */
+  resolveChoice(option: number): void {
+    const s = this.state;
+    const c = s.pendingChoice;
+    if (!c) return;
+    s.pendingChoice = null;
+    const risky = option === 1;
+    switch (c.id) {
+      case "hardWinter":
+        if (risky) {
+          const gain = 18 * s.world.abundance;
+          s.resources.food += gain;
+          const lost = this.applyHazard("strength", BALANCE.predatorLethality);
+          this.logEvent("choice", `A winter hunt brings ${Math.round(gain)} food${lost ? ` — ${lost} did not return` : ""}.`);
+        } else {
+          s.resources.food = Math.max(0, s.resources.food - 8);
+          this.logEvent("choice", "The tribe rations its stores and waits out the cold.");
+        }
+        break;
+      case "sickCamp":
+        if (risky) {
+          const lost = this.applyHazard("diseaseResistance", BALANCE.diseaseLethality);
+          this.logEvent("choice", `The fever runs its course${lost ? ` — ${lost} did not recover` : ""}.`);
+        } else {
+          s.resources.food = Math.max(0, s.resources.food - 6);
+          for (const ind of this.living) ind.health = clamp01(ind.health + 0.15);
+          this.logEvent("choice", "The tribe tends its sick back to health.");
+        }
+        break;
+      case "rivalCache":
+        if (risky) {
+          const gain = 24 * s.world.abundance;
+          s.resources.food += gain;
+          const lost = this.applyHazard("strength", BALANCE.raidLethality);
+          this.logEvent("choice", `The tribe raids the cache for ${Math.round(gain)} food${lost ? ` — ${lost} fell in the fight` : ""}.`);
+        } else {
+          const gain = 8 * s.world.abundance;
+          s.resources.food += gain;
+          this.logEvent("choice", `The tribe trades for ${Math.round(gain)} food, keeping the peace.`);
+        }
+        break;
+    }
   }
 
   private reproduce(e: Required<TechEffects>): void {

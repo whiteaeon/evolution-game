@@ -1,0 +1,16 @@
+{
+  "taskId": "content-event-chains",
+  "claim": "Added three choice-driven branching events (hardWinter, sickCamp, rivalCache) in the pure sim via a pendingChoice/resolveChoice mechanism mirroring the encounter API, each with a cautious-vs-risky trade-off, surfaced by a UI modal; deterministic unit tests cover both branches of all three events, and the headless autopilot still reaches the Information Age (year 487).",
+  "filesChanged": [
+    "src/sim/types.ts",
+    "src/sim/simulation.ts",
+    "src/sim/headless.ts",
+    "src/sim/eventchains.test.ts",
+    "src/game/controller.ts",
+    "src/ui/overlay.ts"
+  ],
+  "ranTests": true,
+  "ranBuild": true,
+  "ranSim": true,
+  "notes": "pendingChoice mirrors pendingEncounter: it lives on SimState (serialized for free via the existing state spread), is set by maybeEventChain() during tick(), and is resolved externally by resolveChoice(option) — sim stays pure (no Phaser/DOM). Option 0 is always cautious (a sure food cost), option 1 risky (bigger payoff, applyHazard deaths). Controller auto-pauses on pendingChoice; headless auto-resolves with the cautious option 0. applyHazard now returns its death count (used only for log flavor; existing callers ignore it). UI reuses the existing .modal classes (no CSS change). 43 tests pass; build passes; npm run sim reaches the Information Age at year 487."
+}

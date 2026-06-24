@@ -26,6 +26,8 @@ for (let i = 1; i <= MAX_TICKS; i++) {
   sim.autoAllocate({ gather: 4, hunt: 2, research: 3, cook: 1, build: 1 });
   // Auto-accept any interbreeding offer (the interactive game lets you choose).
   if (sim.state.pendingEncounter) sim.resolveEncounter(true);
+  // Take the cautious branch of any event chain (the game lets you choose).
+  if (sim.state.pendingChoice) sim.resolveChoice(0);
   sim.tick();
 
   if (sim.state.era !== lastEra || i % 40 === 0) {
