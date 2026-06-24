@@ -1,0 +1,90 @@
+[
+  {
+    "id": "art-cc0-integration",
+    "priority": 1,
+    "type": "art",
+    "title": "Integrate a real CC0 pixel-art pack behind the texture layer",
+    "description": "Replace (or augment) the programmatic textures in src/game/textures.ts with a genuine CC0/public-domain pixel-art pack (e.g. Kenney) for terrain/biomes, structures and animals. Keep all art access behind the existing texture-key indirection so the scene is untouched. Add an ATTRIBUTION/licence note to the README. The hominin era-morph may stay hand-authored if no CC0 equivalent exists — say so.",
+    "verify": "Game still builds and runs; biome/structure/animal sprites are sourced from a CC0 pack with attribution in the README; src/game/MainScene.ts changes are minimal (texture keys only); sim untouched."
+  },
+  {
+    "id": "art-hominin-morph-polish",
+    "priority": 2,
+    "type": "art",
+    "title": "Refine the 9-stage hominin morph (shading, silhouettes, animation hint)",
+    "description": "Improve the per-era human sprite in src/game/textures.ts: cleaner silhouettes, better shading/dithering, a subtle idle bob or 2-frame walk, and clearer era-to-era clothing/tool reads. Keep textures keyed by morph signature so they stay deduped.",
+    "verify": "npm run build passes; sprite textures still generated per morph key; no change to src/sim; a screenshot-able visible improvement described in AGENT_REPORT."
+  },
+  {
+    "id": "map-deeper-exploration",
+    "priority": 3,
+    "type": "feature",
+    "title": "Deepen map exploration: fog-of-war + per-region discovery",
+    "description": "Add lightweight exploration: regions start undiscovered and are revealed by migrating to adjacent ones (or scouting). Track discovered regions in sim state (serialize-safe) and reflect it in the map UI (src/ui/map.ts). Keep the sim pure; the map view only reads state.",
+    "verify": "New unit test covers discovery state + a save/load round-trip including it; npm test/build pass; sim still reaches the Information Age; map UI shows undiscovered vs discovered regions."
+  },
+  {
+    "id": "family-tree-descendants-view",
+    "priority": 4,
+    "type": "feature",
+    "title": "Family tree: add a descendants view + search by id",
+    "description": "Today the family tree is ancestry-focused. Add a toggle to view a focal individual's DESCENDANTS, and a small search box to jump to an individual by id. Drive entirely off existing lineage data (motherId/fatherId). No sim changes required.",
+    "verify": "npm test/build pass; family-tree view offers ancestry/descendants toggle and id search; no src/sim changes; no console errors."
+  },
+  {
+    "id": "balance-food-storage-cap",
+    "priority": 5,
+    "type": "balance",
+    "title": "Add a soft food-storage cap so surplus can't grow unbounded",
+    "description": "Mid/late game the food pool can balloon into the thousands, removing tension. Add a storage cap that scales with shelter tier / capacity (a tunable in the BALANCE block), so hoarding is bounded. Keep the autopilot able to reach the final era.",
+    "verify": "New/updated test asserts food is bounded by the cap; npm test/build pass; npm run sim still reaches the Information Age within the sane year range; change confined to src/sim with a BALANCE entry."
+  },
+  {
+    "id": "content-event-chains",
+    "priority": 6,
+    "type": "content",
+    "title": "Add a few choice-driven event chains",
+    "description": "Add 2-3 small branching events (beyond the current one-shot hazards/bounties) that offer the player a choice with trade-offs (e.g. a hard winter: ration food vs. risk a hunt). Model them in the pure sim with a pending-choice mechanism mirroring the existing encounter API; the UI surfaces the choice.",
+    "verify": "Unit tests cover each event's branches deterministically; npm test/build pass; sim still reaches the Information Age; encounter-style pending-choice pattern reused (no sim/render leak)."
+  },
+  {
+    "id": "audio-ambient-music",
+    "priority": 7,
+    "type": "audio",
+    "title": "Add light era-aware ambient audio (WebAudio) and SFX, off by default",
+    "description": "Extend src/ui/audio.ts with a gentle generative ambient pad that shifts subtly by era, plus a couple of SFX (birth, discovery). Must remain OFF until the player enables sound, and must never block on autoplay. Pure UI concern.",
+    "verify": "npm build passes; audio stays off by default and only starts after a user gesture; no changes to src/sim; toggling sound works."
+  },
+  {
+    "id": "perf-living-cache",
+    "priority": 8,
+    "type": "perf",
+    "title": "Cache the per-tick `living` list to cut O(n) filtering",
+    "description": "Simulation.living filters the full individuals array (which grows with every birth) many times per tick. Cache the living list once per tick and invalidate on births/deaths/migration, without changing behavior. Determinism must be preserved exactly.",
+    "verify": "All existing tests pass byte-identically (determinism intact: same seed → same winning year); npm build passes; a micro-benchmark or note in AGENT_REPORT shows fewer full-array scans; change confined to src/sim/simulation.ts."
+  },
+  {
+    "id": "ux-onboarding-polish",
+    "priority": 9,
+    "type": "ux",
+    "title": "Polish onboarding + first-session guidance",
+    "description": "Improve the tutorial/first-run experience in src/ui/overlay.ts: clearer first steps, a hint pointing at the Map and Family buttons, and a dismissible 'next objective' nudge tied to state.goal. Keep it skippable and remembered in localStorage.",
+    "verify": "npm build passes; tutorial still shows once and is dismissible/remembered; no sim changes; no console errors."
+  },
+  {
+    "id": "a11y-keyboard-contrast",
+    "priority": 10,
+    "type": "accessibility",
+    "title": "Accessibility pass: keyboard controls + contrast + ARIA",
+    "description": "Add keyboard shortcuts (space=pause, 1/2/4=speed, m=map, f=family), ensure focus styles on interactive controls, check colour contrast on key text, and add ARIA labels to icon-only buttons. UI-only.",
+    "verify": "npm build passes; documented keyboard shortcuts work; icon buttons have accessible labels; no sim changes."
+  },
+  {
+    "id": "perf-sprite-pooling",
+    "priority": 11,
+    "type": "perf",
+    "title": "Pool tribe sprites instead of create/destroy churn",
+    "description": "MainScene currently destroys/creates hominin sprites as individuals come and go. Introduce a small object pool to reuse Phaser images, reducing GC churn at large populations. Render-only; behavior unchanged.",
+    "verify": "npm build passes; game still renders the capped sprite set correctly; no src/sim changes; AGENT_REPORT notes the pooling approach."
+  }
+]

@@ -1,0 +1,15 @@
+# dependencies & build output
+node_modules/
+dist/
+
+# Vite / tooling caches
+.vite/
+*.tsbuildinfo
+
+# agent-loop runtime memory (the seed backlog IS tracked; these are per-run state)
+agent-loop/state/results/
+agent-loop/state/ledger.jsonl
+
+# os / editor
+Thumbs.db
+.DS_Store
