@@ -1081,7 +1081,7 @@ export class Simulation {
       stone += BALANCE.stonePerBuilder * eff * e.buildMult * b.stone;
     }
     st.resources.buildProgress += build;
-    st.resources.materials += build * 0.2;
+    st.resources.materials += build * BALANCE.materialsPerBuild;
     st.resources.wood += wood;
     st.resources.stone += stone;
 

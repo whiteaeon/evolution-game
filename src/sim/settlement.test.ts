@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Simulation } from "./simulation.js";
 import { regionById } from "./regions.js";
+import { BALANCE } from "./balance.js";
 
 const WORK = { gather: 4, hunt: 2, research: 3, cook: 1, build: 1 };
 
@@ -87,6 +88,12 @@ describe("per-settlement production", () => {
     expect(st.resources.buildProgress).toBeGreaterThan(0);
     // Production is local: the home pool is untouched by the settlement's work.
     expect(sim.state.resources.wood).toBe(homeWoodBefore);
+    // The settlement mints worked goods at the same BALANCE.materialsPerBuild
+    // ratio as the home camp — no divergent hardcoded constant in this path.
+    expect(st.resources.materials).toBeCloseTo(
+      st.resources.buildProgress * BALANCE.materialsPerBuild,
+      9,
+    );
   });
 
   it("local biome pressures differ between settlements (forest yields more wood than desert)", () => {
