@@ -695,6 +695,39 @@ export class Simulation {
     for (let i = 0; i < ticks; i++) this.tick();
   }
 
+  /**
+   * Advance only the survival economy by one slow step, for the directly-played
+   * world (WorldScene). Seasons shift, the tribe eats from the shared food store
+   * the player has been filling by gathering, cold and hunger cull the frail, and
+   * well-fed adults bear children up to the carrying capacity — which the
+   * `housingBonus` from the player's placed huts raises. Uses the same
+   * consume/age/reproduce model as {@link tick}, but deliberately omits
+   * production, research, raids, events, encounters and rivals: those are driven
+   * directly by the player in the interactive scene, so this never advances the
+   * tech tree on its own nor queues a pending decision the scene cannot surface.
+   * Never called by the headless autopilot, so it cannot perturb the balance or
+   * replay of `npm run sim`.
+   */
+  economyTick(housingBonus = 0): void {
+    const s = this.state;
+    if (this.living.length === 0) return;
+    s.tick++;
+    const effects = s.knowledge.aggregateEffects();
+    s.culture.foldInto(effects);
+    s.policies.foldInto(effects);
+    this.applyLeaderBonus(effects);
+    // Player-built huts add carrying capacity (and, via the soft cap below, a
+    // little more food storage): more shelter, more people the land can hold.
+    effects.capacityBonus += Math.max(0, housingBonus);
+    updateWorld(this.state, this.config, effects);
+    this.consumeAndUpdateNeeds(effects);
+    this.ageAndDie(effects);
+    reproduce(this.eng, effects);
+    this.updateLeader();
+    s.totals.peakPopulation = Math.max(s.totals.peakPopulation, this.living.length);
+    s.resources.food = Math.min(s.resources.food, this.foodStorageCap(effects));
+  }
+
   private biome(): BiomeProfile {
     return BIOME_PROFILE[this.state.biome];
   }

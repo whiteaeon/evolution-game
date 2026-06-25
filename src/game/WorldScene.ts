@@ -115,6 +115,17 @@ const GIFT_RELATIONS = 0.2; // relations warmed per gift (mirrors the sim's dipl
 const GIFT_RANGE = 56; // how close to the neighbour camp you must stand
 const GIFT_COOLDOWN_MS = 600; // a brief pause between gifts
 
+/**
+ * The living economy runs in slow real-time while you play: every tick the tribe
+ * eats from the shared food store you fill by gathering, the seasons turn, and
+ * births/deaths play out (see {@link Simulation.economyTick}). One tick is a
+ * deliberate, readable beat — slow enough that a stocked larder buys you time to
+ * range out and explore.
+ */
+const ECONOMY_TICK_MS = 7000;
+/** Carrying-capacity each player-built hut adds — more shelter, more people. */
+const HUT_CAPACITY = 4;
+
 const RAID_FIRST_MS = 45000; // first raid only after the player has settled in
 const RAID_REPEAT_MS = 120000; // quiet stretch between raids
 const RAID_WARN_MS = 12000; // sighting → raiders reach the camp (the defend window)
@@ -247,6 +258,13 @@ export class WorldScene extends Phaser.Scene {
   private gatherPrompt!: Phaser.GameObjects.Text;
   private resHud!: Phaser.GameObjects.Text;
   private housing = 0;
+
+  // The slow survival economy: a timer paces economyTick calls, and the food
+  // change across the last tick drives a trend readout so the player can see at a
+  // glance whether the tribe is being fed or going hungry.
+  private econHud!: Phaser.GameObjects.Text;
+  private economyTimer = 0;
+  private foodTrend = 0; // net food change across the most recent economy tick
 
   // Belief: a ritual at any campfire offers food and accrues the sim's existing
   // Culture track; a HUD line shows the belief total/stage and a burst marks
@@ -665,6 +683,17 @@ export class WorldScene extends Phaser.Scene {
         fontFamily: "monospace",
         fontSize: "12px",
         color: "#ffe54a",
+        backgroundColor: "#00000066",
+        padding: { x: 6, y: 3 },
+      })
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH);
+
+    this.econHud = this.add
+      .text(10, 118, "", {
+        fontFamily: "monospace",
+        fontSize: "12px",
+        color: "#cfe8b0",
         backgroundColor: "#00000066",
         padding: { x: 6, y: 3 },
       })
@@ -1202,6 +1231,7 @@ export class WorldScene extends Phaser.Scene {
     this.updateRitual(dt);
     this.updateDiplomacy(dt);
     this.updateRaid(dt);
+    this.updateEconomy(dt);
     this.updateQuests();
     this.updateInspectMarks();
     this.revealFog();
@@ -1732,6 +1762,39 @@ export class WorldScene extends Phaser.Scene {
         ease: "Quad.easeOut",
       });
     }
+  }
+
+  // ── survival economy ─────────────────────────────────────────────────────────
+
+  /** Carrying capacity the player's placed huts contribute on top of the sim's. */
+  private housingCapacity(): number {
+    return this.housing * HUT_CAPACITY;
+  }
+
+  /**
+   * Pace the slow survival economy. While a blocking overlay (tutorial, dialog,
+   * a panel) is up the world holds its breath; otherwise, once per
+   * {@link ECONOMY_TICK_MS}, the tribe eats the food the player has gathered,
+   * the seasons turn, and births/deaths resolve — with the player's huts raising
+   * the population ceiling. The food change is captured for the HUD trend readout.
+   */
+  private updateEconomy(dt: number): void {
+    if (this.tutorialStep >= 0 || this.dialogOpen || this.techPanelOpen || this.inspectOpen) return;
+    const sim = this.ctrl.sim;
+    if (sim.living.length === 0) return; // the tribe is gone — nothing left to tick
+    this.economyTimer += dt;
+    if (this.economyTimer < ECONOMY_TICK_MS) return;
+    this.economyTimer = 0;
+
+    const foodBefore = sim.state.resources.food;
+    const popBefore = sim.living.length;
+    sim.economyTick(this.housingCapacity());
+    this.foodTrend = sim.state.resources.food - foodBefore;
+
+    // Surface the human stakes: a birth or a loss gets a quiet floating note.
+    const popAfter = sim.living.length;
+    if (popAfter > popBefore) this.flash(`A child is born — the tribe is ${popAfter} strong`);
+    else if (popAfter < popBefore) this.flash(`${popBefore - popAfter} of the tribe lost`);
   }
 
   // ── belief (rituals at the campfire) ─────────────────────────────────────────
@@ -2340,6 +2403,18 @@ export class WorldScene extends Phaser.Scene {
     this.resHud.setText(
       `🍖 ${Math.floor(r.food)}   🪵 ${Math.floor(r.wood)}   🪨 ${Math.floor(r.stone)}   🏠 ${this.housing}`,
     );
+
+    // Survival readout: which way the larder is trending, the tribe against the
+    // ceiling the player's huts raise, and the season pressing on both.
+    const eff = s.knowledge.aggregateEffects();
+    eff.capacityBonus += this.housingCapacity();
+    const cap = Math.round(this.ctrl.sim.carryingCapacity(eff));
+    const pop = this.ctrl.sim.living.length;
+    const trend = this.foodTrend > 0.05 ? "▲" : this.foodTrend < -0.05 ? "▼" : "▬";
+    const net = `${this.foodTrend >= 0 ? "+" : ""}${this.foodTrend.toFixed(1)}`;
+    const season = ["❄ Winter", "🌱 Spring", "☀ Summer", "🍂 Autumn"][s.world.seasonIndex] ?? "";
+    this.econHud.setText(`Tribe ${trend} food ${net}/tick · 👥 ${pop}/${cap} · 🏠 ${this.housing} · ${season}`);
+
     const target = s.researchTarget;
     if (target && TECH_TREE[target]) {
       const def = TECH_TREE[target];
