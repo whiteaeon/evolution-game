@@ -27,6 +27,13 @@ export interface RivalTribe {
   techProgress: number;
   /** Disposition toward the player: -1 hostile … 0 neutral … +1 friendly. */
   disposition: number;
+  /**
+   * Diplomatic standing the player has *built* with this tribe, in [-1, 1].
+   * Unlike {@link disposition} (their intrinsic, drifting mood), this only moves
+   * in response to diplomacy events the player resolves — so it is a pure,
+   * deterministic record of the relationship.
+   */
+  relations: number;
 }
 
 /** Tunables for rival evolution, grouped so the balance is in one place. */
@@ -97,6 +104,7 @@ export function createRivals(rng: RNG, startRegion: string): RivalTribe[] {
       eraIndex: 0,
       techProgress: 0,
       disposition: clamp(rng.gauss(0, 0.2), -1, 1),
+      relations: 0,
     });
   }
   return rivals;
@@ -144,6 +152,15 @@ export function evolveRival(r: RivalTribe, rng: RNG): void {
     -1,
     1,
   );
+}
+
+/**
+ * Shift a rival's player-relations score by `delta`, clamped to [-1, 1]. The one
+ * place relations ever changes, so the bound is guaranteed and the move is a pure
+ * deterministic function of the current score and the delta.
+ */
+export function shiftRelations(r: RivalTribe, delta: number): void {
+  r.relations = clamp(r.relations + delta, -1, 1);
 }
 
 /** The {@link Era} a rival currently sits in (their tech level). */

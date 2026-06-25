@@ -15,15 +15,17 @@ import {
   type QuestContext,
   type QuestProgress,
 } from "./quests.js";
-import { createRivals, evolveRival, type RivalTribe } from "./rivals.js";
+import { createRivals, evolveRival, shiftRelations, type RivalTribe } from "./rivals.js";
 import {
   ERAS,
   LINEAGES,
   SHELTERS,
   TASKS,
   TRAITS,
+  DIPLOMACY_EVENTS,
   type Biome,
   type ChoiceOption,
+  type DiplomacyId,
   type Encounter,
   type Era,
   type EventChainId,
@@ -81,6 +83,14 @@ const BALANCE = {
   migrateRisk: 0.5, // base per-person death chance over a full-map journey
   foodStoragePerCapacity: 9, // soft cap: max stored food = carryingCapacity * this (bounds hoarding)
   eventChainInterval: 37, // ticks between possible choice-driven event chains
+  // Diplomacy: periodic encounters with a rival that trade food for relations.
+  diplomacyInterval: 43, // ticks between possible diplomacy events
+  diploReciprocateCost: 6, // food sent back when reciprocating a gift
+  diploGiftKept: 10, // food gained by keeping a gift and giving nothing back
+  diploTributeCost: 8, // food paid to defuse a border tension
+  diploAidCost: 7, // food sent in answer to a request for aid
+  diploRelUp: 0.2, // relations gained by the generous response
+  diploRelDown: 0.2, // relations lost by the self-serving response
 };
 
 interface ShelterDef {
@@ -188,6 +198,42 @@ const EVENT_CHAIN_DEF: Record<
     options: [
       { label: "Honour it from afar", hint: "leave offerings, the camp's spirits lift" },
       { label: "Claim the sacred ground", hint: "rich materials, but the ground is guarded" },
+    ],
+  },
+};
+
+/**
+ * Presentation for each diplomacy event. Like {@link EVENT_CHAIN_DEF}, the
+ * trade-off logic lives in {@link Simulation.resolveChoice}; this is just the
+ * framing. The message is templated with the rival's name. Option 0 is always the
+ * generous response (spend food, warm relations), option 1 the self-serving one.
+ */
+const DIPLOMACY_DEF: Record<
+  DiplomacyId,
+  { title: string; message: (name: string) => string; options: [ChoiceOption, ChoiceOption] }
+> = {
+  diploGift: {
+    title: "A neighbour's gift",
+    message: (n) => `A gift arrives at your camp from ${n}. Send one in return, or keep it and give nothing?`,
+    options: [
+      { label: "Send a gift in return", hint: "spend food, relations warm" },
+      { label: "Keep it, give nothing", hint: "gain food, but relations cool" },
+    ],
+  },
+  diploTension: {
+    title: "Tension at the border",
+    message: (n) => `Tension flares along the border with ${n}. Offer tribute, or stand firm?`,
+    options: [
+      { label: "Offer tribute", hint: "spend food, relations warm" },
+      { label: "Stand firm", hint: "spend nothing, but relations cool" },
+    ],
+  },
+  diploRequest: {
+    title: "A request for aid",
+    message: (n) => `Word comes from ${n}, asking aid through a hard season. Send aid, or refuse?`,
+    options: [
+      { label: "Send aid", hint: "spend food, relations warm" },
+      { label: "Refuse", hint: "keep your stores, but relations cool" },
     ],
   },
 };
@@ -473,6 +519,7 @@ export class Simulation {
     if (popBeforeDeaths - this.living.length >= 2) this.emitDialogue("death");
     this.maybeEncounter();
     this.maybeEventChain();
+    this.maybeDiplomacy();
     this.reproduce(effects);
     this.tryUpgradeShelter();
     this.evolveRivals();
@@ -798,6 +845,40 @@ export class Simulation {
   }
 
   /**
+   * Periodic diplomacy with a rival tribe. Mirrors {@link maybeEventChain} —
+   * surfaces a pending choice via the same mechanism — but it concerns a specific
+   * rival (`rivalId`) and its outcome shifts that rival's relations score. The
+   * trigger draws on the rival RNG stream, so deciding *when* a neighbour reaches
+   * out never perturbs the player's own simulation or replay.
+   */
+  private maybeDiplomacy(): void {
+    const s = this.state;
+    if (s.pendingChoice || s.pendingEncounter) return;
+    if (s.rivals.length === 0 || this.living.length < 4) return;
+    if (s.tick % BALANCE.diplomacyInterval !== 0) return;
+    if (!this.rivalRng.chance(0.5)) return;
+
+    const rival = this.rivalRng.pick(s.rivals);
+    const id = this.rivalRng.pick(DIPLOMACY_EVENTS);
+    const def = DIPLOMACY_DEF[id];
+    s.pendingChoice = {
+      id,
+      title: def.title,
+      message: def.message(rival.name),
+      options: def.options,
+      expiresTick: s.tick + 6,
+      rivalId: rival.id,
+    };
+    this.logEvent("choice", s.pendingChoice.message);
+    this.emitDialogue("eventChain");
+  }
+
+  /** A rival by id, for resolving a diplomacy choice. */
+  private rivalById(id?: string): RivalTribe | undefined {
+    return id ? this.state.rivals.find((r) => r.id === id) : undefined;
+  }
+
+  /**
    * Resolve a pending choice. Option 0 is the cautious branch (a sure cost),
    * option 1 the risky branch (a bigger payoff at the cost of lives).
    */
@@ -909,6 +990,46 @@ export class Simulation {
           this.logEvent("choice", "Offerings are left at the sacred site; the camp's spirits lift.");
         }
         break;
+      case "diploGift": {
+        const rival = this.rivalById(c.rivalId);
+        const who = rival?.name ?? "the rival";
+        if (risky) {
+          s.resources.food += BALANCE.diploGiftKept;
+          if (rival) shiftRelations(rival, -BALANCE.diploRelDown);
+          this.logEvent("choice", `The tribe keeps ${who}'s gift and gives nothing back — relations cool.`);
+        } else {
+          s.resources.food = Math.max(0, s.resources.food - BALANCE.diploReciprocateCost);
+          if (rival) shiftRelations(rival, BALANCE.diploRelUp);
+          this.logEvent("choice", `A gift is sent in return to ${who} — relations warm.`);
+        }
+        break;
+      }
+      case "diploTension": {
+        const rival = this.rivalById(c.rivalId);
+        const who = rival?.name ?? "the rival";
+        if (risky) {
+          if (rival) shiftRelations(rival, -BALANCE.diploRelDown);
+          this.logEvent("choice", `The tribe stands firm against ${who} — relations cool.`);
+        } else {
+          s.resources.food = Math.max(0, s.resources.food - BALANCE.diploTributeCost);
+          if (rival) shiftRelations(rival, BALANCE.diploRelUp);
+          this.logEvent("choice", `Tribute is paid to ${who}, defusing the tension — relations warm.`);
+        }
+        break;
+      }
+      case "diploRequest": {
+        const rival = this.rivalById(c.rivalId);
+        const who = rival?.name ?? "the rival";
+        if (risky) {
+          if (rival) shiftRelations(rival, -BALANCE.diploRelDown);
+          this.logEvent("choice", `The tribe refuses ${who}'s plea — relations cool.`);
+        } else {
+          s.resources.food = Math.max(0, s.resources.food - BALANCE.diploAidCost);
+          if (rival) shiftRelations(rival, BALANCE.diploRelUp);
+          this.logEvent("choice", `Aid is sent to ${who} through the hard season — relations warm.`);
+        }
+        break;
+      }
     }
   }
 
