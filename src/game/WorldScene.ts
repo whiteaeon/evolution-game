@@ -20,7 +20,7 @@ import { buildRaidSides, resolveRaid } from "./raidDefense.js";
 import { outbreakRisk } from "./epidemicRisk.js";
 import { isPointVisible } from "./cull.js";
 import { particleBudget } from "./particleBudget.js";
-import { acceptCelebrationCount, BURST_STYLE, questCelebrationCount, raidCelebrationCount } from "./feedback.js";
+import { acceptCelebrationCount, BURST_STYLE, gatherBurstCount, questCelebrationCount, raidCelebrationCount } from "./feedback.js";
 import {
   TUTORIAL_STEPS,
   advanceTutorial,
@@ -2385,7 +2385,7 @@ export class WorldScene extends Phaser.Scene {
     const px = spr.x;
     const py = spr.y - spr.displayHeight * 0.5; // burst from the node's middle
     this.floatGain(px, py, `+${amt} ${node.kind}`, RES_TEXT[node.kind]);
-    this.popParticles(px, py, RES_COLOR[node.kind]);
+    this.popParticles(px, py, RES_COLOR[node.kind], gatherBurstCount(amt));
     this.audio.gather(node.kind);
 
     if (node.amount <= 0) {

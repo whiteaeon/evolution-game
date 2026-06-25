@@ -27,6 +27,21 @@ export const BURST_STYLE: Record<FeedbackKind, BurstStyle> = {
   quest: { color: 0x9fe0ff, count: 10, rise: -0.5 },
 };
 
+/** Baseline dots a single gather swing pops — the scene's default burst size. */
+export const GATHER_BURST_BASE = 7;
+
+/**
+ * How many particles one gather swing pops. Better tools (a higher researched
+ * gatherMult) harvest more per swing, so the burst swells one dot per extra unit
+ * taken — a fat-yield strike pops fatter, visibly rewarding the tech investment,
+ * exactly as quest and raid bursts swell with their payoff. A bare-handed single
+ * unit keeps the baseline; clamped to stay tasteful and cheap.
+ */
+export function gatherBurstCount(amount: number): number {
+  const bonus = Math.max(0, Math.floor(amount) - 1);
+  return Math.min(12, GATHER_BURST_BASE + bonus);
+}
+
 /**
  * How many celebration particles a completed quest turn-in earns: the baseline
  * quest burst, swelled a little by the size of the payout so a fat reward pops

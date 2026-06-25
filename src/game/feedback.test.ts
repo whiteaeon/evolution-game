@@ -3,6 +3,8 @@ import {
   acceptCelebrationCount,
   burstForEvent,
   BURST_STYLE,
+  gatherBurstCount,
+  GATHER_BURST_BASE,
   questCelebrationCount,
   raidCelebrationCount,
   type FeedbackKind,
@@ -59,6 +61,14 @@ describe("event feedback routing", () => {
     for (const reward of [0, 8, 12, 40, 1000]) {
       expect(acceptCelebrationCount(reward)).toBeLessThan(questCelebrationCount(reward));
     }
+  });
+
+  it("swells the gather burst with the harvest yield, but keeps it capped", () => {
+    expect(gatherBurstCount(1)).toBe(GATHER_BURST_BASE); // bare-handed single unit → baseline
+    expect(gatherBurstCount(3)).toBe(GATHER_BURST_BASE + 2); // +1 dot per extra unit taken
+    expect(gatherBurstCount(5)).toBeGreaterThan(gatherBurstCount(2)); // a fatter swing pops fatter
+    expect(gatherBurstCount(100)).toBeLessThanOrEqual(12); // never floods the scene
+    expect(gatherBurstCount(0)).toBe(GATHER_BURST_BASE); // never dips below the baseline
   });
 
   it("makes a breach a small, subdued puff regardless of band size", () => {
