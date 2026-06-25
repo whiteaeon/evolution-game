@@ -161,6 +161,8 @@ export interface TechDef {
   prereqs: TechId[];
   cost: number;
   effects: TechEffects;
+  /** Raw resources that must be in stock (and are spent) to complete this tech. */
+  resourceCost?: ResourceCost;
   /** If set, discovering this tech advances the world to that era. */
   unlocksEra?: Era;
   blurb: string;
@@ -271,11 +273,21 @@ export interface PendingChoice {
   rivalId?: string;
 }
 
+/** Carryable raw resources gathered by workers, beyond food. */
+export const GATHERED_RESOURCES = ["wood", "stone", "hide"] as const;
+export type GatheredResource = (typeof GATHERED_RESOURCES)[number];
+/** A bill of raw resources, e.g. a shelter or tech cost. */
+export type ResourceCost = Partial<Record<GatheredResource, number>>;
+
 export interface ResourcePools {
   food: number;
   materials: number;
   /** Progress toward the next shelter upgrade. */
   buildProgress: number;
+  /** Carryable raw resources, gathered per-biome by builders/hunters. */
+  wood: number;
+  stone: number;
+  hide: number;
 }
 
 export interface SimConfig {

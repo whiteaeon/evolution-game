@@ -42,6 +42,7 @@ import {
   type Genome,
   type Individual,
   type Lineage,
+  type ResourceCost,
   type ResourcePools,
   type Shelter,
   type SimConfig,
@@ -79,6 +80,12 @@ const BALANCE = {
   researchCompression: 0.5, // sub-linear exponent on the aggregate research multiplier
   researchCrowding: 0.82, // diminishing returns as the research team grows (coordination cost)
   buildBase: 1.0,
+  // Carryable raw resources gathered per worker, scaled by per-biome availability
+  // (see BiomeProfile.wood/stone/hide). Builders cut wood + quarry stone; hunters
+  // take hide from the game they bring down.
+  woodPerBuilder: 0.7,
+  stonePerBuilder: 0.5,
+  hidePerHunter: 0.35,
   coldLethality: 0.24,
   starveLethality: 0.18,
   diseaseLethality: 0.2,
@@ -111,15 +118,16 @@ const BALANCE = {
 interface ShelterDef {
   warmth: number;
   capacity: number; // additive carrying capacity
-  buildCost: number;
+  buildCost: number; // labor (buildProgress) required
+  cost: ResourceCost; // raw resources (wood/stone/hide) consumed on build
   minEra: Era; // earliest era it can be built in
 }
 const SHELTER_DEF: Record<Shelter, ShelterDef> = {
-  cave: { warmth: 0.15, capacity: 0, buildCost: 0, minEra: "Paleolithic" },
-  hut: { warmth: 0.3, capacity: 6, buildCost: 35, minEra: "Paleolithic" },
-  village: { warmth: 0.38, capacity: 16, buildCost: 80, minEra: "Neolithic" },
-  town: { warmth: 0.45, capacity: 32, buildCost: 170, minEra: "Iron Age" },
-  city: { warmth: 0.5, capacity: 60, buildCost: 340, minEra: "Industrial" },
+  cave: { warmth: 0.15, capacity: 0, buildCost: 0, cost: {}, minEra: "Paleolithic" },
+  hut: { warmth: 0.3, capacity: 6, buildCost: 35, cost: { wood: 16, stone: 4, hide: 4 }, minEra: "Paleolithic" },
+  village: { warmth: 0.38, capacity: 16, buildCost: 80, cost: { wood: 30, stone: 16, hide: 8 }, minEra: "Neolithic" },
+  town: { warmth: 0.45, capacity: 32, buildCost: 170, cost: { wood: 45, stone: 38, hide: 12 }, minEra: "Iron Age" },
+  city: { warmth: 0.5, capacity: 60, buildCost: 340, cost: { wood: 70, stone: 75, hide: 20 }, minEra: "Industrial" },
 };
 
 /** Trait leanings each neighbouring group contributes when you interbreed. */
@@ -348,7 +356,7 @@ export class Simulation {
     return {
       tick: 0,
       individuals,
-      resources: { food: this.config.startingFood ?? 20, materials: 0, buildProgress: 0 },
+      resources: { food: this.config.startingFood ?? 20, materials: 0, buildProgress: 0, wood: 0, stone: 0, hide: 0 },
       knowledge,
       world: { cold: this.config.baseCold, abundance: 1, season: 0, seasonIndex: 0 },
       shelter: "cave",
@@ -606,6 +614,7 @@ export class Simulation {
 
     const b = this.biome();
     let food = 0;
+    let hide = 0;
     for (const w of this.workers.gather) {
       const techMult = k.has("gathering") ? 1 : 0.95;
       food += BALANCE.gatherBase * (0.5 + w.genome.dexterity) * e.gatherMult * b.gatherMult * techMult * s.world.abundance;
@@ -613,17 +622,29 @@ export class Simulation {
     for (const w of this.workers.hunt) {
       const techMult = k.has("hunting") ? 1 : 0.6;
       food += BALANCE.huntBase * (0.5 + w.genome.strength) * e.huntMult * b.huntMult * techMult * s.world.abundance;
+      // Hide is taken from the game that is hunted — biome-scaled, like the meat.
+      hide += BALANCE.hidePerHunter * (0.5 + w.genome.strength) * e.huntMult * b.hide;
     }
     food *= e.foodMult;
     s.resources.food += food;
+    s.resources.hide += hide;
 
     s.cookingActive = k.has("cooking") && this.workers.cook.length > 0 && s.resources.food > 0;
 
     let build = 0;
-    for (const w of this.workers.build)
-      build += BALANCE.buildBase * (0.5 + w.genome.strength * 0.5 + w.genome.dexterity * 0.5) * e.buildMult;
+    let wood = 0;
+    let stone = 0;
+    for (const w of this.workers.build) {
+      const eff = 0.5 + w.genome.strength * 0.5 + w.genome.dexterity * 0.5;
+      build += BALANCE.buildBase * eff * e.buildMult;
+      // Builders also cut wood and quarry stone, by the biome's availability.
+      wood += BALANCE.woodPerBuilder * eff * e.buildMult * b.wood;
+      stone += BALANCE.stonePerBuilder * eff * e.buildMult * b.stone;
+    }
     s.resources.buildProgress += build;
     s.resources.materials += build * 0.2;
+    s.resources.wood += wood;
+    s.resources.stone += stone;
 
     this.doResearch(e);
   }
@@ -656,8 +677,14 @@ export class Simulation {
     points *= Math.pow(e.researchMult, BALANCE.researchCompression) * cooperation;
     if (points <= 0) return;
 
-    const completed = s.knowledge.addProgress(s.researchTarget, points);
+    // Some techs are gated on a stock of raw resources (e.g. stone to smelt
+    // bronze): research can fill up to the cost but only completes once the bill
+    // is in hand, and the resources are spent when it does.
+    const req = TECH_TREE[s.researchTarget].resourceCost;
+    const ready = !req || this.hasResources(req);
+    const completed = s.knowledge.addProgress(s.researchTarget, points, ready);
     if (completed) {
+      if (req) this.spendResources(req);
       const def = TECH_TREE[completed];
       const kind: SimEventType = def.unlocksEra ? "milestone" : "discovery";
       this.logEvent(kind, def.unlocksEra ? `${def.name} — the ${def.unlocksEra} begins!` : `Discovered ${def.name}.`);
@@ -1145,8 +1172,13 @@ export class Simulation {
     const s = this.state;
     const target = s.researchTarget ?? s.knowledge.available()[0] ?? null;
     if (!target) return;
-    const done = s.knowledge.addProgress(target, points);
-    if (done) this.logEvent("discovery", `A flash of insight completes ${TECH_TREE[done].name}!`);
+    const req = TECH_TREE[target].resourceCost;
+    const ready = !req || this.hasResources(req);
+    const done = s.knowledge.addProgress(target, points, ready);
+    if (done) {
+      if (req) this.spendResources(req);
+      this.logEvent("discovery", `A flash of insight completes ${TECH_TREE[done].name}!`);
+    }
   }
 
   private reproduce(e: Required<TechEffects>): void {
@@ -1247,11 +1279,26 @@ export class Simulation {
     const next = SHELTERS[idx + 1];
     const def = SHELTER_DEF[next];
     if (eraIndex(s.era) < eraIndex(def.minEra)) return; // era-gated
-    if (s.resources.buildProgress >= def.buildCost) {
-      s.resources.buildProgress -= def.buildCost;
-      s.shelter = next;
-      this.logEvent("milestone", `The tribe builds a ${next}.`);
-    }
+    if (s.resources.buildProgress < def.buildCost) return; // labor gate
+    if (!this.hasResources(def.cost)) return; // raw-material gate
+    s.resources.buildProgress -= def.buildCost;
+    this.spendResources(def.cost);
+    s.shelter = next;
+    this.logEvent("milestone", `The tribe builds a ${next}.`);
+  }
+
+  /** Whether the tribe currently holds at least the resources in `req`. */
+  private hasResources(req: ResourceCost): boolean {
+    const r = this.state.resources;
+    return (req.wood ?? 0) <= r.wood && (req.stone ?? 0) <= r.stone && (req.hide ?? 0) <= r.hide;
+  }
+
+  /** Deduct a resource bill from the pools (assumes {@link hasResources}). */
+  private spendResources(req: ResourceCost): void {
+    const r = this.state.resources;
+    if (req.wood) r.wood -= req.wood;
+    if (req.stone) r.stone -= req.stone;
+    if (req.hide) r.hide -= req.hide;
   }
 
   /**
