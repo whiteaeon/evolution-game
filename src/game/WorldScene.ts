@@ -230,6 +230,7 @@ export class WorldScene extends Phaser.Scene {
 
   private fog: Phaser.GameObjects.Rectangle[] = [];
   private fogRevealed: boolean[] = [];
+  private fogRemaining = 0; // unrevealed cells left, so revealFog can stop scanning
 
   private dialog!: Phaser.GameObjects.Container;
   private dialogName!: Phaser.GameObjects.Text;
@@ -762,6 +763,7 @@ export class WorldScene extends Phaser.Scene {
         this.fogRevealed.push(false);
       }
     }
+    this.fogRemaining = this.fog.length;
   }
 
   private buildHud(): void {
@@ -1543,9 +1545,13 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private updateQuests(): void {
+    // Snapshot the live counters once per frame, not once per quest: questProgress
+    // would otherwise rebuild a metrics object on every call (twice per quest).
+    const metrics = this.questMetrics();
+    const progress = (q: Quest) => questMetric(q, metrics) - q.start;
     let tracker = "";
     for (const q of this.quests) {
-      if (q.state === "active" && this.questProgress(q) >= q.target) q.state = "ready";
+      if (q.state === "active" && progress(q) >= q.target) q.state = "ready";
       const marker = this.questMarkers.get(q.giverId);
       const giver = this.npcs.find((n) => n.ind.id === q.giverId);
       if (marker && giver) {
@@ -1573,7 +1579,7 @@ export class WorldScene extends Phaser.Scene {
         tracker =
           q.state === "ready"
             ? `◆ ${q.desc} — done! return to ${who}`
-            : `◆ ${who}: ${q.desc} — ${Math.min(this.questProgress(q), q.target)}/${q.target}`;
+            : `◆ ${who}: ${q.desc} — ${Math.min(progress(q), q.target)}/${q.target}`;
       }
     }
     if (!tracker) {
@@ -2447,21 +2453,35 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private revealFog(): void {
+    if (this.fogRemaining === 0) return; // whole map lifted — skip the scan entirely
     const px = this.player.x;
     const py = this.player.y;
     const reach = 150;
     const cols = Math.ceil(WORLD_W / FOG_CELL);
-    for (let i = 0; i < this.fog.length; i++) {
-      if (this.fogRevealed[i]) continue;
-      const cx = (i % cols) * FOG_CELL + FOG_CELL / 2;
-      const cy = Math.floor(i / cols) * FOG_CELL + FOG_CELL / 2;
-      if (Phaser.Math.Distance.Between(px, py, cx, cy) < reach) {
-        this.fogRevealed[i] = true;
-        this.tweens.add({ targets: this.fog[i], alpha: 0, duration: 350 });
-        // Credit any explore region this freshly-revealed cell falls within.
-        for (const rg of this.exploreRegions) {
-          if (Phaser.Math.Distance.Between(rg.x, rg.y, cx, cy) < rg.r) {
-            this.regionExplored[rg.name] = (this.regionExplored[rg.name] ?? 0) + 1;
+    const rows = Math.ceil(WORLD_H / FOG_CELL);
+    // A cell can only flip when its centre is within `reach` of the player, which
+    // also bounds it to within `reach` on each axis — so scan just that window of
+    // cells around the player instead of every fog tile in the world. The inner
+    // distance test still gates exactly, so the cells revealed are unchanged.
+    const minC = Math.max(0, Math.floor((px - reach - FOG_CELL / 2) / FOG_CELL));
+    const maxC = Math.min(cols - 1, Math.ceil((px + reach - FOG_CELL / 2) / FOG_CELL));
+    const minR = Math.max(0, Math.floor((py - reach - FOG_CELL / 2) / FOG_CELL));
+    const maxR = Math.min(rows - 1, Math.ceil((py + reach - FOG_CELL / 2) / FOG_CELL));
+    for (let r = minR; r <= maxR; r++) {
+      for (let c = minC; c <= maxC; c++) {
+        const i = r * cols + c;
+        if (this.fogRevealed[i]) continue;
+        const cx = c * FOG_CELL + FOG_CELL / 2;
+        const cy = r * FOG_CELL + FOG_CELL / 2;
+        if (Phaser.Math.Distance.Between(px, py, cx, cy) < reach) {
+          this.fogRevealed[i] = true;
+          this.fogRemaining--;
+          this.tweens.add({ targets: this.fog[i], alpha: 0, duration: 350 });
+          // Credit any explore region this freshly-revealed cell falls within.
+          for (const rg of this.exploreRegions) {
+            if (Phaser.Math.Distance.Between(rg.x, rg.y, cx, cy) < rg.r) {
+              this.regionExplored[rg.name] = (this.regionExplored[rg.name] ?? 0) + 1;
+            }
           }
         }
       }
