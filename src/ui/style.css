@@ -124,6 +124,8 @@ button.big { font-weight: 700; padding: 7px 14px; }
 .resources b { color: var(--ink); }
 .resources .sep { color: var(--line); }
 .resources .cooking { color: var(--accent); font-weight: 700; }
+.resources .prod { color: var(--accent2); font-size: 11px; }
+.resgate { margin-top: 4px; font-size: 12px; color: var(--ink-dim); }
 .legacy { margin-top: 6px; font-size: 11px; color: var(--blue); }
 
 .badges { display: flex; flex-wrap: wrap; gap: 6px; }

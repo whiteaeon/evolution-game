@@ -23,6 +23,8 @@ import { TechGraph } from "./techgraph.js";
 import { ChronicleView } from "./chronicle.js";
 import { keyboardShortcut } from "./shortcuts.js";
 import { eraSpans, traitDeltas, summaryHTML, type EraEntry } from "./summary.js";
+import { resourcesPanelHTML, type ResourceGate, type ResourceProduction } from "./resources.js";
+import { GATHERED_RESOURCES, type GatheredResource } from "../sim/index.js";
 import { questLogHTML } from "./quests.js";
 import { diplomacyPanelHTML } from "./diplomacy.js";
 import { codexHTML } from "./codex.js";
@@ -65,6 +67,10 @@ export class UIOverlay {
   private peakPop = 0;
   private trackedSim: GameController["sim"] | null = null;
   private lastSample = -1;
+  private lastResSample = -1;
+  /** Recent per-tick gains of each raw resource, averaged into a production rate. */
+  private resHistory: Record<GatheredResource, number[]> = { wood: [], stone: [], hide: [] };
+  private lastStock: Record<GatheredResource, number> | null = null;
   private lastTechCount = -1;
   private lastEra = "";
   private lastBirths = -1;
@@ -387,12 +393,18 @@ export class UIOverlay {
       p.classList.toggle("here", pe === s.era);
     });
 
-    this.el.resources.innerHTML = [
-      `🍖 Food <b>${Math.floor(s.resources.food)}</b>`,
-      `🏠 ${cap(s.shelter)}`,
-      `🗺 ${regionById(s.region).name} <span class="dim2">(${s.biome})</span>`,
-      s.cookingActive ? `<span class="cooking">cooking ✓</span>` : "",
-    ].filter(Boolean).join("<span class='sep'>·</span>");
+    this.el.resources.innerHTML = resourcesPanelHTML({
+      food: s.resources.food,
+      wood: s.resources.wood,
+      stone: s.resources.stone,
+      hide: s.resources.hide,
+      prod: this.sampleProduction(s),
+      shelter: s.shelter,
+      regionName: regionById(s.region).name,
+      biome: s.biome,
+      cooking: s.cookingActive,
+      gate: this.researchGate(s),
+    });
 
     if (this.map.visible) this.map.render();
     if (this.tree.visible) this.tree.render();
@@ -592,6 +604,48 @@ export class UIOverlay {
     setTimeout(() => el.remove(), 4000);
   }
 
+  /**
+   * Derive a smoothed production rate for each raw resource from the change in
+   * its stock between sim ticks (sampled once per tick via the controller's
+   * stamp). Spends — a shelter upgrade or a tech consuming materials — show up as
+   * a dip and are clamped to zero so the readout reflects gathering, not net.
+   */
+  private sampleProduction(s: GameController["sim"]["state"]): ResourceProduction {
+    if (this.ctrl.tickStamp !== this.lastResSample) {
+      this.lastResSample = this.ctrl.tickStamp;
+      if (this.lastStock) {
+        for (const r of GATHERED_RESOURCES) {
+          const arr = this.resHistory[r];
+          arr.push(Math.max(0, s.resources[r] - this.lastStock[r]));
+          if (arr.length > 12) arr.shift();
+        }
+      }
+      this.lastStock = { wood: s.resources.wood, stone: s.resources.stone, hide: s.resources.hide };
+    }
+    const avg = (r: GatheredResource) => {
+      const a = this.resHistory[r];
+      return a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
+    };
+    return { wood: avg("wood"), stone: avg("stone"), hide: avg("hide") };
+  }
+
+  /**
+   * The active research target's resource gate, if it is parked waiting on raw
+   * materials the tribe hasn't stockpiled yet (e.g. bronzeworking needs stone).
+   * Pure read of sim state and the tech tree; null when nothing is blocked.
+   */
+  private researchGate(s: GameController["sim"]["state"]): ResourceGate | null {
+    const target = s.researchTarget;
+    if (!target || s.knowledge.has(target)) return null;
+    const cost = TECH_TREE[target].resourceCost;
+    if (!cost) return null;
+    const needs = GATHERED_RESOURCES.filter((r) => (cost[r] ?? 0) > s.resources[r]).map((r) => ({
+      resource: r,
+      amount: Math.ceil((cost[r] ?? 0) - s.resources[r]),
+    }));
+    return needs.length ? { label: TECH_TREE[target].name, needs } : null;
+  }
+
   private sampleAndDrawGraph(pop: number, intel: number): void {
     if (this.ctrl.tickStamp !== this.lastSample) {
       this.lastSample = this.ctrl.tickStamp;
@@ -634,6 +688,8 @@ export class UIOverlay {
       this.peakPop = 0;
       this.shownQuestDone.clear();
       this.questsPrimed = false;
+      this.resHistory = { wood: [], stone: [], hide: [] };
+      this.lastStock = null;
     }
     if (!this.startTraits) this.startTraits = { ...avg.traits };
     if (avg.count > this.peakPop) this.peakPop = avg.count;
@@ -683,5 +739,3 @@ export class UIOverlay {
     );
   }
 }
-
-const cap = (str: string) => str.charAt(0).toUpperCase() + str.slice(1);
