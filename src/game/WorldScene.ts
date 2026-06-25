@@ -18,7 +18,7 @@ import { buildDialogue, type DialogNode } from "./dialogue.js";
 import { buildRaidSides, resolveRaid } from "./raidDefense.js";
 import { outbreakRisk } from "./epidemicRisk.js";
 import { isPointVisible } from "./cull.js";
-import { BURST_STYLE, questCelebrationCount, raidCelebrationCount } from "./feedback.js";
+import { acceptCelebrationCount, BURST_STYLE, questCelebrationCount, raidCelebrationCount } from "./feedback.js";
 import {
   TUTORIAL_STEPS,
   advanceTutorial,
@@ -1158,6 +1158,14 @@ export class WorldScene extends Phaser.Scene {
     q.start = questMetric(q, this.questMetrics());
     this.flash(`Task accepted: ${q.desc}`);
     this.audio.questAccept();
+    // Acknowledge the bargain at the giver: a subdued cyan puff (smaller than the
+    // turn-in burst — this is a promise, not a payoff) over a floating preview of
+    // the reward the player is now working toward.
+    const giver = this.npcs.find((n) => n.ind.id === q.giverId)?.sprite;
+    const gx = giver ? giver.x : this.player.x;
+    const gy = (giver ? giver.y : this.player.y) - 20;
+    this.floatGain(gx, gy, `Reward: +${q.reward.amount} ${q.reward.res}`, RES_TEXT[q.reward.res]);
+    this.popParticles(gx, gy, BURST_STYLE.quest.color, acceptCelebrationCount(q.reward.amount));
     this.tutorialEvent("quest");
   }
 
