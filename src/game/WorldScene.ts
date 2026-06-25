@@ -10,6 +10,7 @@ import {
 } from "./textures.js";
 import { HOMININ_WALK, homininFrameKey } from "./homininWalk.js";
 import { chooseNpcActivity, type NpcActivity } from "./npcActivity.js";
+import { questMetric, type QuestMetrics, type QuestSpec } from "./quests.js";
 import {
   TUTORIAL_STEPS,
   advanceTutorial,
@@ -111,17 +112,20 @@ interface Gatherable {
   sprite: Phaser.GameObjects.Image;
   kind: ResKind;
   amount: number;
+  farm?: boolean; // true for crops on a farm the player placed
 }
 
-/** A task a villager gives you: gather or build something for a reward. */
-interface Quest {
+/** A circular area an explore quest asks the player to scout. */
+interface Region {
+  name: string;
+  x: number;
+  y: number;
+  r: number;
+}
+
+/** A live quest: a {@link QuestSpec} bound to a giver, with runtime state. */
+interface Quest extends QuestSpec {
   giverId: number;
-  desc: string;
-  kind: "gather" | "build";
-  res?: ResKind;
-  build?: "hut" | "farm";
-  target: number;
-  reward: { res: ResKind; amount: number };
   state: "available" | "active" | "ready" | "done";
   start: number; // progress-metric snapshot taken when accepted
 }
@@ -186,9 +190,17 @@ export class WorldScene extends Phaser.Scene {
   private npcTimer = 0;
   private objText!: Phaser.GameObjects.Text;
   private farmsBuilt = 0;
+  private farmHarvests = 0; // food taken from farms the player placed
+  private talkedTo = new Set<number>(); // distinct villagers the player has spoken to
   private quests: Quest[] = [];
   private questMarkers = new Map<number, Phaser.GameObjects.Text>();
+  private exploreRegions: Region[] = [];
+  private regionExplored: Record<string, number> = {}; // fog cells revealed per region
   private gathered: Record<ResKind, number> = { wood: 0, food: 0, stone: 0 };
+
+  private questLog!: Phaser.GameObjects.Container;
+  private questLogText!: Phaser.GameObjects.Text;
+  private questLogOpen = false;
 
   private tutorialStep = -1; // -1 = inactive (already seen, or finished/skipped)
   private tutorialCard: Phaser.GameObjects.Container | null = null;
@@ -227,6 +239,7 @@ export class WorldScene extends Phaser.Scene {
     this.buildDayNight();
     this.buildDialog();
     this.buildBuildBar();
+    this.buildQuestLog();
     // A grid-snapped footprint sits under the ghost so the placement cell — and
     // whether it is affordable (green) or not (red) — is unmistakable.
     this.ghostTile = this.add
@@ -284,6 +297,7 @@ export class WorldScene extends Phaser.Scene {
     );
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => this.updateGhost(p));
     this.input.keyboard!.on("keydown-ESC", () => this.cancelBuild());
+    this.input.keyboard!.on("keydown-L", () => this.toggleQuestLog());
 
     // First run only: teach the core loop with a dismissible staged overlay.
     if (!tutorialSeen()) this.startTutorial();
@@ -497,7 +511,7 @@ export class WorldScene extends Phaser.Scene {
       .setVisible(false);
 
     this.add
-      .text(VIEW_W / 2, 28, "WASD/click move · click a villager · Space to gather · build from the bar", {
+      .text(VIEW_W / 2, 28, "WASD/click move · click a villager · Space to gather · build from the bar · L: quests", {
         fontFamily: "monospace",
         fontSize: "10px",
         color: "#cfe0d0",
@@ -579,6 +593,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private openDialog(ind: Individual): void {
+    this.talkedTo.add(ind.id); // every conversation counts toward "talk to N villagers"
     const q = this.quests.find((x) => x.giverId === ind.id && x.state !== "done");
     this.dialogName.setText(individualName(ind));
     this.dialogBody.setText(q ? this.questLine(q) : this.lineFor(ind));
@@ -591,12 +606,7 @@ export class WorldScene extends Phaser.Scene {
   private questLine(q: Quest): string {
     if (q.state === "available") {
       q.state = "active";
-      q.start =
-        q.kind === "gather" && q.res
-          ? this.gathered[q.res]
-          : q.build === "farm"
-            ? this.farmsBuilt
-            : this.housing;
+      q.start = questMetric(q, this.questMetrics());
       this.flash(`Task accepted: ${q.desc}`);
       this.tutorialEvent("quest");
       return `A task for you: ${q.desc}. Come back when it's done for ${q.reward.amount} ${q.reward.res}.`;
@@ -728,7 +738,7 @@ export class WorldScene extends Phaser.Scene {
       // A farm is flat ground you walk over — and a renewable food source.
       const crop = this.add.image(wx, wy, "crop").setDepth(2);
       this.raiseIn(crop);
-      this.gatherables.push({ sprite: crop, kind: "food", amount: 12 });
+      this.gatherables.push({ sprite: crop, kind: "food", amount: 12, farm: true });
       this.farmsBuilt += 1;
       this.flash("Farm built — Space to harvest food");
     } else {
@@ -1041,13 +1051,24 @@ export class WorldScene extends Phaser.Scene {
   // ── quests ───────────────────────────────────────────────────────────────
 
   private setupQuests(): void {
-    const specs: Omit<Quest, "giverId" | "state" | "start">[] = [
+    // One explore region per "explore" spec — placed out in the fog so there is
+    // something to scout. The display name doubles as the region's key.
+    const ridge: Region = { name: "the eastern ridge", x: WORLD_W - 220, y: CAMP.y, r: 150 };
+    this.exploreRegions.push(ridge);
+
+    const specs: QuestSpec[] = [
       { desc: "Gather 5 wood", kind: "gather", res: "wood", target: 5, reward: { res: "food", amount: 12 } },
       { desc: "Build a Farm", kind: "build", build: "farm", target: 1, reward: { res: "wood", amount: 15 } },
       { desc: "Gather 4 stone", kind: "gather", res: "stone", target: 4, reward: { res: "food", amount: 15 } },
+      { desc: `Scout ${ridge.name}`, kind: "explore", region: ridge.name, target: 6, reward: { res: "stone", amount: 8 } },
+      { desc: "Talk to 3 villagers", kind: "talk", target: 3, reward: { res: "food", amount: 10 } },
+      { desc: "Harvest 3 food from a farm", kind: "harvest", target: 3, reward: { res: "wood", amount: 12 } },
     ];
+    // Spread the givers across the band; step keeps them distinct even if the
+    // band is small (the golden-angle spawn already scatters them in space).
+    const step = Math.max(1, Math.floor(this.npcs.length / specs.length));
     specs.forEach((s, i) => {
-      const giver = this.npcs[i * 4]; // spread the givers through the band
+      const giver = this.npcs[i * step];
       if (!giver) return;
       this.quests.push({ ...s, giverId: giver.ind.id, state: "available", start: 0 });
       const marker = this.add
@@ -1067,11 +1088,21 @@ export class WorldScene extends Phaser.Scene {
     return n ? individualName(n.ind) : "a villager";
   }
 
+  /** The live counters every quest's progress is read from. */
+  private questMetrics(): QuestMetrics {
+    return {
+      gathered: this.gathered,
+      housing: this.housing,
+      farmsBuilt: this.farmsBuilt,
+      villagersTalked: this.talkedTo.size,
+      farmHarvests: this.farmHarvests,
+      regionExplored: this.regionExplored,
+    };
+  }
+
   /** How far along an accepted quest is, measured against its accept-time snapshot. */
   private questProgress(q: Quest): number {
-    if (q.kind === "gather" && q.res) return this.gathered[q.res] - q.start;
-    if (q.kind === "build") return (q.build === "farm" ? this.farmsBuilt : this.housing) - q.start;
-    return 0;
+    return questMetric(q, this.questMetrics()) - q.start;
   }
 
   private updateQuests(): void {
@@ -1103,6 +1134,61 @@ export class WorldScene extends Phaser.Scene {
         : "◆ All tasks done — explore freely";
     }
     this.objText.setText(tracker);
+    if (this.questLogOpen) this.refreshQuestLog();
+  }
+
+  // ── quest log panel ────────────────────────────────────────────────────────
+
+  private buildQuestLog(): void {
+    const w = 300;
+    const x = VIEW_W - w / 2 - 10;
+    const y = 96;
+    const panel = this.add.rectangle(0, 0, w, 8, 0x141c12, 0.94).setStrokeStyle(2, 0x6f8c5a).setOrigin(0.5, 0);
+    const title = this.add
+      .text(-w / 2 + 12, 8, "Quest Log  (L)", {
+        fontFamily: "monospace",
+        fontSize: "13px",
+        color: "#ffe08a",
+        fontStyle: "bold",
+      })
+      .setOrigin(0, 0);
+    this.questLogText = this.add
+      .text(-w / 2 + 12, 30, "", {
+        fontFamily: "monospace",
+        fontSize: "11px",
+        color: "#e9e0c8",
+        wordWrap: { width: w - 24 },
+        lineSpacing: 4,
+      })
+      .setOrigin(0, 0);
+    // The panel height tracks the text so the border always wraps the list.
+    this.questLog = this.add
+      .container(x, y, [panel, title, this.questLogText])
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH + 2)
+      .setVisible(false);
+    this.questLog.setData("panel", panel);
+  }
+
+  private toggleQuestLog(): void {
+    this.questLogOpen = !this.questLogOpen;
+    this.questLog.setVisible(this.questLogOpen);
+    if (this.questLogOpen) this.refreshQuestLog();
+  }
+
+  /** Redraw the log: every still-open quest with giver name + progress. */
+  private refreshQuestLog(): void {
+    const open = this.quests.filter((q) => q.state !== "done");
+    const lines = open.map((q) => {
+      const who = this.giverName(q.giverId);
+      if (q.state === "available") return `• ${q.desc}\n   from ${who} — talk to accept (!)`;
+      if (q.state === "ready") return `• ${q.desc}\n   ✓ done — return to ${who} (?)`;
+      const p = Math.min(this.questProgress(q), q.target);
+      return `• ${q.desc}\n   ${who} — ${p}/${q.target}`;
+    });
+    this.questLogText.setText(lines.length ? lines.join("\n") : "All tasks done — explore freely.");
+    const panel = this.questLog.getData("panel") as Phaser.GameObjects.Rectangle;
+    panel.height = this.questLogText.height + 38; // wrap the title + list
   }
 
   private blocked(x: number, y: number): boolean {
@@ -1145,6 +1231,7 @@ export class WorldScene extends Phaser.Scene {
   private gather(node: Gatherable): void {
     this.ctrl.sim.state.resources[node.kind] += 1;
     this.gathered[node.kind] += 1;
+    if (node.farm) this.farmHarvests += 1; // food taken from a farm the player placed
     node.amount -= 1;
     this.gatherCooldown = GATHER_COOLDOWN_MS;
     this.tutorialEvent("gather");
@@ -1359,6 +1446,12 @@ export class WorldScene extends Phaser.Scene {
       if (Phaser.Math.Distance.Between(px, py, cx, cy) < reach) {
         this.fogRevealed[i] = true;
         this.tweens.add({ targets: this.fog[i], alpha: 0, duration: 350 });
+        // Credit any explore region this freshly-revealed cell falls within.
+        for (const rg of this.exploreRegions) {
+          if (Phaser.Math.Distance.Between(rg.x, rg.y, cx, cy) < rg.r) {
+            this.regionExplored[rg.name] = (this.regionExplored[rg.name] ?? 0) + 1;
+          }
+        }
       }
     }
   }
