@@ -21,6 +21,7 @@ import { buildRaidSides, resolveRaid } from "./raidDefense.js";
 import { outbreakRisk } from "./epidemicRisk.js";
 import { isPointVisible } from "./cull.js";
 import { particleBudget } from "./particleBudget.js";
+import { removeSolid, type Solid } from "./solids.js";
 import { acceptCelebrationCount, BURST_STYLE, gatherBurstCount, questCelebrationCount, questRingScale, raidCelebrationCount, rallyBurstCount } from "./feedback.js";
 import {
   TUTORIAL_STEPS,
@@ -214,6 +215,7 @@ interface Gatherable {
   amount: number;
   init: number; // amount at spawn, so the sprite can shrink as it depletes
   farm?: boolean; // true for crops on a farm the player placed
+  solid?: Solid; // the collision blocker to drop when this node depletes (trees/rocks)
 }
 
 /** A circular area an explore quest asks the player to scout. */
@@ -328,7 +330,7 @@ export class WorldScene extends Phaser.Scene {
   private helpOverlay!: Phaser.GameObjects.Container;
   private helpOpen = false;
 
-  private solids: { x: number; y: number; r: number }[] = [];
+  private solids: Solid[] = [];
   private gatherables: Gatherable[] = [];
   private campfires: { x: number; y: number }[] = []; // fires villagers cluster at after dark
   // Player-placed permanent buildings (huts/campfires), tracked for save/load.
@@ -835,8 +837,9 @@ export class WorldScene extends Phaser.Scene {
       if (Phaser.Math.Distance.Between(x, y, CAMP.x, CAMP.y) < CLEARING_R + 16) continue;
       if (this.solids.some((s) => Phaser.Math.Distance.Between(x, y, s.x, s.y) < s.r + 14)) continue;
       const img = this.add.image(x, y, key).setOrigin(0.5, 1).setDepth(y);
-      if (solidR > 0) this.solids.push({ x, y, r: solidR });
-      this.gatherables.push({ sprite: img, kind, amount, init: amount });
+      const solid = solidR > 0 ? { x, y, r: solidR } : undefined;
+      if (solid) this.solids.push(solid);
+      this.gatherables.push({ sprite: img, kind, amount, init: amount, solid });
       placed++;
     }
   }
@@ -2531,6 +2534,7 @@ export class WorldScene extends Phaser.Scene {
     if (node.amount <= 0) {
       // Depleted: a final pop, then clearly wilt away — shrink, tip and fade out.
       this.gatherables = this.gatherables.filter((g) => g !== node);
+      this.solids = removeSolid(this.solids, node.solid); // drop the now-gone node's blocker
       if (this.gatherTarget === node) this.gatherTarget = null; // target gone; re-aim next frame
       node.sprite.clearTint(); // drop the highlight before the wilt tween plays
       this.popParticles(px, py, RES_COLOR[node.kind]);
