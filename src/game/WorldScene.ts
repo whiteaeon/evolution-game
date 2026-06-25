@@ -36,6 +36,13 @@ const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 /** The raw resources you can gather and spend. */
 type ResKind = "wood" | "food" | "stone";
 
+/** Minimum gap between harvests, so holding/spamming Space reads as crisp hits. */
+const GATHER_COOLDOWN_MS = 220;
+/** Particle tint per resource — woody brown, leafy green, cool grey stone. */
+const RES_COLOR: Record<ResKind, number> = { wood: 0xb5793b, food: 0x6fcf57, stone: 0xc2c6cf };
+/** Floating-gain text colour per resource (a brighter sibling of the particle). */
+const RES_TEXT: Record<ResKind, string> = { wood: "#e0a060", food: "#9fe070", stone: "#d6dae6" };
+
 /** Placeable structures, each with a cost and a perk it grants. */
 interface BuildType {
   id: string;
@@ -116,6 +123,8 @@ export class WorldScene extends Phaser.Scene {
   private solids: { x: number; y: number; r: number }[] = [];
   private gatherables: Gatherable[] = [];
   private gatherKey!: Phaser.Input.Keyboard.Key;
+  private gatherCooldown = 0;
+  private sfxCtx: AudioContext | null = null;
   private gatherPrompt!: Phaser.GameObjects.Text;
   private resHud!: Phaser.GameObjects.Text;
   private housing = 0;
@@ -664,7 +673,7 @@ export class WorldScene extends Phaser.Scene {
     this.ctrl.update(dt); // keeps the world model alive (no-op while paused)
     this.movePlayer(dt);
     this.wanderNpcs(dt);
-    this.updateGather();
+    this.updateGather(dt);
     this.updateQuests();
     this.revealFog();
     this.syncHud();
@@ -775,18 +784,21 @@ export class WorldScene extends Phaser.Scene {
 
   // ── gathering ────────────────────────────────────────────────────────────
 
-  private updateGather(): void {
+  private updateGather(dt: number): void {
+    if (this.gatherCooldown > 0) this.gatherCooldown -= dt;
     const node = this.nearestGatherable(34);
     if (!node) {
       this.gatherPrompt.setVisible(false);
       return;
     }
     const cam = this.cameras.main;
+    const ready = this.gatherCooldown <= 0;
     this.gatherPrompt
-      .setText(`Space: gather ${node.kind}`)
+      .setText(ready ? `Space: gather ${node.kind}` : "…")
+      .setAlpha(ready ? 1 : 0.6)
       .setPosition(node.sprite.x - cam.scrollX, node.sprite.y - cam.scrollY - node.sprite.displayHeight)
       .setVisible(true);
-    if (Phaser.Input.Keyboard.JustDown(this.gatherKey)) this.gather(node);
+    if (ready && Phaser.Input.Keyboard.JustDown(this.gatherKey)) this.gather(node);
   }
 
   private nearestGatherable(range: number): Gatherable | null {
@@ -806,12 +818,113 @@ export class WorldScene extends Phaser.Scene {
     this.ctrl.sim.state.resources[node.kind] += 1;
     this.gathered[node.kind] += 1;
     node.amount -= 1;
-    this.flash(`+1 ${node.kind}`);
-    this.tweens.add({ targets: node.sprite, y: node.sprite.y - 3, yoyo: true, duration: 90 });
+    this.gatherCooldown = GATHER_COOLDOWN_MS;
+
+    const spr = node.sprite;
+    const px = spr.x;
+    const py = spr.y - spr.displayHeight * 0.5; // burst from the node's middle
+    this.floatGain(px, py, `+1 ${node.kind}`, RES_TEXT[node.kind]);
+    this.popParticles(px, py, RES_COLOR[node.kind]);
+    this.gatherSfx(node.kind);
+
     if (node.amount <= 0) {
-      const spr = node.sprite;
-      this.tweens.add({ targets: spr, alpha: 0, duration: 300, onComplete: () => spr.destroy() });
+      // Depleted: a final pop, then clearly wilt away — shrink, tip and fade out.
       this.gatherables = this.gatherables.filter((g) => g !== node);
+      this.popParticles(px, py, RES_COLOR[node.kind]);
+      this.tweens.add({
+        targets: spr,
+        alpha: 0,
+        scaleX: spr.scaleX * 0.45,
+        scaleY: spr.scaleY * 0.45,
+        angle: spr.angle + 14,
+        duration: 460,
+        ease: "Back.easeIn",
+        onComplete: () => spr.destroy(),
+      });
+    } else {
+      // A squash-and-stretch punch so each individual hit lands.
+      this.tweens.add({
+        targets: spr,
+        scaleX: spr.scaleX * 1.14,
+        scaleY: spr.scaleY * 0.88,
+        duration: 80,
+        yoyo: true,
+        ease: "Quad.easeOut",
+      });
+    }
+  }
+
+  /** A small radial burst of fading dots at a world point — the gather "pop". */
+  private popParticles(x: number, y: number, color: number): void {
+    const n = 7;
+    for (let i = 0; i < n; i++) {
+      const a = (Math.PI * 2 * i) / n + Math.random() * 0.6;
+      const dist = 10 + Math.random() * 14;
+      const dot = this.add
+        .circle(x, y, Phaser.Math.Between(2, 3), color)
+        .setDepth(FOG_DEPTH - 2);
+      this.tweens.add({
+        targets: dot,
+        x: x + Math.cos(a) * dist,
+        y: y + Math.sin(a) * dist - 6,
+        alpha: 0,
+        scale: 0.3,
+        duration: 340 + Math.random() * 140,
+        ease: "Quad.easeOut",
+        onComplete: () => dot.destroy(),
+      });
+    }
+  }
+
+  /** A "+1 wood" that rises off the node and fades — anchored in the world. */
+  private floatGain(x: number, y: number, msg: string, color: string): void {
+    const t = this.add
+      .text(x, y, msg, {
+        fontFamily: "monospace",
+        fontSize: "12px",
+        color,
+        fontStyle: "bold",
+        stroke: "#000000",
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(FOG_DEPTH - 1);
+    this.tweens.add({
+      targets: t,
+      y: y - 26,
+      alpha: 0,
+      duration: 760,
+      ease: "Sine.easeOut",
+      onComplete: () => t.destroy(),
+    });
+  }
+
+  /** A soft synthesized "tock", pitched per resource. Lazily opened on first use
+   *  — always within the Space-key gesture, so browser autoplay rules are met. */
+  private gatherSfx(kind: ResKind): void {
+    try {
+      if (!this.sfxCtx) {
+        const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (!Ctor) return;
+        this.sfxCtx = new Ctor();
+      }
+      const ctx = this.sfxCtx;
+      if (ctx.state === "suspended") void ctx.resume();
+      const base = { wood: 220, food: 330, stone: 165 }[kind];
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = "triangle";
+      const now = ctx.currentTime;
+      osc.frequency.setValueAtTime(base, now);
+      osc.frequency.exponentialRampToValueAtTime(base * 1.5, now + 0.08);
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.linearRampToValueAtTime(0.06, now + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+      osc.connect(g).connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.2);
+    } catch {
+      /* audio unavailable */
     }
   }
 
