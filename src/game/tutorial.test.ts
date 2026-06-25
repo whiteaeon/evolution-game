@@ -27,4 +27,15 @@ describe("advanceTutorial", () => {
     const order = TUTORIAL_STEPS.map((s) => s.event);
     expect(order).toEqual<TutorialEvent[]>(["move", "gather", "build", "quest"]);
   });
+
+  it("teaches a keyboard-only path for every step (no mouse-only instruction)", () => {
+    const byEvent = (e: TutorialEvent) => TUTORIAL_STEPS.find((s) => s.event === e)!.text;
+    // Move/gather already cite keys; build and quest must also name their keys,
+    // so a player without a mouse is never stranded mid-tutorial.
+    expect(byEvent("move")).toMatch(/wasd/i);
+    expect(byEvent("gather")).toMatch(/space/i);
+    expect(byEvent("build")).toMatch(/\b2\b/); // pick the Hut from the keyboard
+    expect(byEvent("build")).toMatch(/enter/i); // place it from the keyboard
+    expect(byEvent("quest")).toMatch(/\bE\b/); // talk to a villager from the keyboard
+  });
 });
