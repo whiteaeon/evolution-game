@@ -31,6 +31,20 @@ export const CONTROLS: readonly ControlHint[] = [
   { keys: "? / H", action: "Toggle this help" },
 ];
 
+/**
+ * Pointer equivalents, shown as a second section in the help overlay so the
+ * "Controls" reference also covers mouse play. These document the clicks the
+ * scene actually handles; they don't cover every action (gathering, rituals and
+ * the panel toggles stay keyboard-only), so the keyboard list above remains the
+ * complete reference.
+ */
+export const MOUSE_CONTROLS: readonly ControlHint[] = [
+  { keys: "Click ground", action: "Walk the chieftain there" },
+  { keys: "Click villager", action: "Talk to them (quests & lore)" },
+  { keys: "Click build bar", action: "Pick a building, then click to place" },
+  { keys: "Click the totem", action: "Open research" },
+];
+
 /** A colourblind-safe marker: a distinct shape (glyph) AND colour. */
 export interface MarkerStyle {
   glyph: string;

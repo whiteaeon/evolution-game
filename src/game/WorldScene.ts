@@ -45,7 +45,7 @@ import {
 } from "../sim/index.js";
 import { dispositionStyle, neighbourRosterLine } from "../ui/diplomacy.js";
 import { policyOptions } from "./policyMenu.js";
-import { CONTROLS, QUEST_MARKER, BUILD_MARKER } from "./a11y.js";
+import { CONTROLS, MOUSE_CONTROLS, QUEST_MARKER, BUILD_MARKER } from "./a11y.js";
 import { WorldAudio } from "../ui/audio.js";
 import type { GameController } from "./controller.js";
 
@@ -669,7 +669,10 @@ export class WorldScene extends Phaser.Scene {
   private buildHelpOverlay(): void {
     const w = 392;
     const rowH = 18;
-    const h = 52 + CONTROLS.length * rowH;
+    const fmt = (c: { keys: string; action: string }) => `${c.keys.padEnd(15)} ${c.action}`;
+    // Keyboard rows, then a "Mouse" sub-heading and the pointer rows (+2 lines).
+    const rows = CONTROLS.length + 2 + MOUSE_CONTROLS.length;
+    const h = 52 + rows * rowH;
     const panel = this.add.rectangle(0, 0, w, h, 0x10140d, 0.96).setStrokeStyle(2, 0xffe08a);
     const title = this.add
       .text(-w / 2 + 16, -h / 2 + 12, "Controls", {
@@ -679,7 +682,7 @@ export class WorldScene extends Phaser.Scene {
         fontStyle: "bold",
       })
       .setOrigin(0, 0);
-    const body = CONTROLS.map((c) => `${c.keys.padEnd(15)} ${c.action}`).join("\n");
+    const body = [...CONTROLS.map(fmt), "", "Mouse", ...MOUSE_CONTROLS.map(fmt)].join("\n");
     const text = this.add
       .text(-w / 2 + 16, -h / 2 + 40, body, {
         fontFamily: "monospace",
