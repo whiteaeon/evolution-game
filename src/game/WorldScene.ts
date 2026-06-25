@@ -24,6 +24,7 @@ import { raidPressed } from "./raidPeace.js";
 import { outbreakRisk } from "./epidemicRisk.js";
 import { isPointVisible } from "./cull.js";
 import { particleBudget } from "./particleBudget.js";
+import { nightGlowAlpha } from "./nightGlow.js";
 import { removeSolid, type Solid } from "./solids.js";
 import { acceptCelebrationCount, BURST_STYLE, dustBurstCount, gatherBurstCount, questCelebrationCount, questRingScale, raidCelebrationCount, rallyBurstCount, studyFloatText } from "./feedback.js";
 import {
@@ -3387,7 +3388,11 @@ export class WorldScene extends Phaser.Scene {
     const night = 0.5 + 0.5 * Math.cos(this.dayTime * Math.PI * 2);
     const flicker = 0.85 + 0.15 * Math.sin(this.time.now / 90);
     for (const l of this.nightLights) {
-      l.glow.setAlpha(l.max * night * (l.fire ? flicker : 1));
+      // Skip the per-frame setAlpha for glows the camera can't see — most of a
+      // long game's lights sit off-screen across the world (update runs before
+      // render, so one scrolling into view is corrected the same frame).
+      const a = nightGlowAlpha(this.onScreen(l.glow.x, l.glow.y), l.max, night, l.fire, flicker);
+      if (a !== null) l.glow.setAlpha(a);
     }
     this.clockHud.setText(this.phaseLabel(this.dayTime));
   }
