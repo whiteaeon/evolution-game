@@ -18,6 +18,7 @@ import { stepGather } from "./gatherCadence.js";
 import { gatherApproach } from "./gatherApproach.js";
 import { movePingStyle } from "./movePing.js";
 import { gatherPulseTint } from "./gatherPulse.js";
+import { gatherUrgencyPeak } from "./gatherUrgency.js";
 import { gatherSwingAngle } from "./gatherSwing.js";
 import { gatherFacing } from "./gatherFacing.js";
 import { gatherPromptText } from "./gatherPrompt.js";
@@ -160,6 +161,8 @@ const GATHER_HILITE = 0xffd27a;
 /** Brighter peak the aim highlight breathes toward, and the cycle length (ms). */
 const GATHER_HILITE_PEAK = 0xfff0d0;
 const GATHER_HILITE_PULSE_MS = 900;
+/** Hotter amber the aim peak warms toward as the node nears depletion. */
+const GATHER_HILITE_HOT = 0xffa64d;
 /** A harvest strike leans the chieftain this far (deg) over this long (ms). */
 const GATHER_SWING_DEG = 12;
 const GATHER_SWING_MS = 260;
@@ -2727,8 +2730,11 @@ export class WorldScene extends Phaser.Scene {
     // cluster of trees which one a Space press will actually harvest.
     if (node) {
       this.gatherHiliteTime += dt;
+      // Warm the breathing peak toward amber as the node thins out, so a nearly
+      // spent node visibly runs hot — a peripheral read of the prompt's "(last)".
+      const peak = gatherUrgencyPeak(node.amount, node.init, GATHER_HILITE_PEAK, GATHER_HILITE_HOT);
       node.sprite.setTint(
-        gatherPulseTint(this.gatherHiliteTime, GATHER_HILITE_PULSE_MS, GATHER_HILITE, GATHER_HILITE_PEAK),
+        gatherPulseTint(this.gatherHiliteTime, GATHER_HILITE_PULSE_MS, GATHER_HILITE, peak),
       );
       // Turn to face the node when working it in place — walking sets the flip,
       // but standing still it would otherwise keep whatever way you last moved
