@@ -94,7 +94,7 @@ export const TECH_TREE: Record<TechId, TechDef> = {
   },
   weaving: {
     id: "weaving", name: "Weaving", era: "Neolithic", category: "craft",
-    prereqs: ["agriculture"], cost: 125,
+    prereqs: ["agriculture"], cost: 125, resourceCost: { hide: 12 },
     effects: { warmth: 0.22 },
     blurb: "Spun fiber and woven cloth — warmth you can carry.",
   },
@@ -115,12 +115,13 @@ export const TECH_TREE: Record<TechId, TechDef> = {
   bronzeworking: {
     id: "bronzeworking", name: "Bronze Working", era: "Bronze Age", category: "craft",
     prereqs: ["pottery", "animalDomestication"], cost: 220, unlocksEra: "Bronze Age",
+    resourceCost: { stone: 16 },
     effects: { buildMult: 1.3, defenseMult: 0.8, huntMult: 1.15 },
     blurb: "Copper and tin, smelted and cast. The first metal age.",
   },
   theWheel: {
     id: "theWheel", name: "The Wheel", era: "Bronze Age", category: "craft",
-    prereqs: ["bronzeworking"], cost: 180,
+    prereqs: ["bronzeworking"], cost: 180, resourceCost: { wood: 14 },
     effects: { gatherMult: 1.2, capacityBonus: 4, buildMult: 1.1 },
     blurb: "Cart and potter's wheel — load and labor, multiplied.",
   },
@@ -147,6 +148,7 @@ export const TECH_TREE: Record<TechId, TechDef> = {
   ironworking: {
     id: "ironworking", name: "Iron Working", era: "Iron Age", category: "craft",
     prereqs: ["bronzeworking", "writing"], cost: 300, unlocksEra: "Iron Age",
+    resourceCost: { stone: 22 },
     effects: { buildMult: 1.3, defenseMult: 0.7, huntMult: 1.15 },
     blurb: "Iron is everywhere and unforgiving. Tools and plows of steel.",
   },
@@ -345,12 +347,18 @@ export class Knowledge {
 
   /**
    * Add research points to a target. Returns the TechId if this push completed
-   * (newly discovered) the tech, else null.
+   * (newly discovered) the tech, else null. When `ready` is false the tech can
+   * fill up to its cost but cannot complete — it parks there until the gating
+   * condition (e.g. its raw-resource bill, checked by the caller) is met.
    */
-  addProgress(target: TechId, points: number): TechId | null {
+  addProgress(target: TechId, points: number, ready = true): TechId | null {
     if (!this.isUnlocked(target)) return null;
     this.progress[target] += points;
     if (this.progress[target] >= TECH_TREE[target].cost) {
+      if (!ready) {
+        this.progress[target] = TECH_TREE[target].cost;
+        return null;
+      }
       this.discovered.add(target);
       return target;
     }
