@@ -8,6 +8,8 @@ import {
   DIFFICULTY_PRESETS,
   SCENARIOS,
   SCENARIO_PRESETS,
+  MUTATORS,
+  MUTATOR_PRESETS,
   QUEST_DEFS,
   POLICY_AXES,
   regionById,
@@ -194,6 +196,13 @@ export class UIOverlay {
             ).join("")}
           </select>
         </label>
+        <fieldset class="newrun mutators" data-el="mutators">
+          <legend>Mutators (next run)</legend>
+          ${MUTATORS.map(
+            (m) =>
+              `<label title="${MUTATOR_PRESETS[m].blurb}"><input type="checkbox" data-mutator="${m}"> ${MUTATOR_PRESETS[m].label}</label>`,
+          ).join("")}
+        </fieldset>
         <div class="resources" data-el="resources"></div>
         <div class="legacy" data-el="legacy"></div>
       </div>
@@ -299,7 +308,7 @@ export class UIOverlay {
 
     const q = (sel: string) => this.root.querySelector(sel) as HTMLElement;
     for (const k of [
-      "era", "year", "gen", "pop", "season", "goal", "goal-text", "eratrack", "resources", "legacy", "difficulty", "scenario",
+      "era", "year", "gen", "pop", "season", "goal", "goal-text", "eratrack", "resources", "legacy", "difficulty", "scenario", "mutators",
       "traits", "graph", "labor", "tasks", "lang", "policies", "techtree", "badges", "ach-count",
       "quests", "quest-count", "rivals", "rival-count", "codex", "codex-count", "log",
       "encounter", "encounter-text", "choice", "choice-title", "choice-text",
@@ -348,6 +357,16 @@ export class UIOverlay {
     });
     (this.el.difficulty as HTMLSelectElement).addEventListener("change", (e) => {
       this.ctrl.setDifficulty((e.target as HTMLSelectElement).value as Difficulty);
+      this.audio.click();
+    });
+    this.el.mutators.addEventListener("change", () => {
+      const selected = MUTATORS.filter(
+        (m) =>
+          (this.el.mutators.querySelector(
+            `[data-mutator="${m}"]`,
+          ) as HTMLInputElement | null)?.checked,
+      );
+      this.ctrl.setMutators(selected);
       this.audio.click();
     });
     this.root.addEventListener("click", (e) => {

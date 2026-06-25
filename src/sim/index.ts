@@ -10,6 +10,7 @@ export * from "./regions.js";
 export * from "./rivals.js";
 export * from "./difficulty.js";
 export * from "./scenarios.js";
+export * from "./mutators.js";
 export * from "./quests.js";
 export * from "./codex.js";
 export * from "./dialogue.js";

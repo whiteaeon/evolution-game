@@ -2,8 +2,10 @@ import {
   Simulation,
   DIFFICULTY_PRESETS,
   SCENARIO_PRESETS,
+  applyMutators,
   type Difficulty,
   type Scenario,
+  type MutatorId,
   type Task,
 } from "../sim/index.js";
 import { foldLegacy, loadLegacy, saveLegacy, type Legacy } from "./legacy.js";
@@ -26,6 +28,8 @@ export class GameController {
   difficulty: Difficulty = "standard";
   /** Start scenario applied to the next run started. */
   scenario: Scenario = "valley";
+  /** Toggleable run mutators applied to the next run started. */
+  mutators: MutatorId[] = [];
   /** Achievements unlocked across all runs (persisted, sticky). */
   unlocked: AchievementId[];
   /** Set once a run has ended (won/extinct) and been folded into the legacy. */
@@ -41,7 +45,7 @@ export class GameController {
   }
 
   private startRun(seed = (Math.random() * 1e9) | 0): void {
-    this.sim = new Simulation({
+    const config = {
       seed,
       founderBonus: this.legacy.bonus,
       ...DIFFICULTY_PRESETS[this.difficulty].config,
@@ -49,7 +53,10 @@ export class GameController {
       // spread last so those knobs win over the difficulty preset, which keeps
       // owning the orthogonal lethality/abundance dials.
       ...SCENARIO_PRESETS[this.scenario].config,
-    });
+    };
+    // Mutators stack last, nudging the composed knobs additively/multiplicatively
+    // so any selected combination layers cleanly over difficulty + scenario.
+    this.sim = new Simulation(applyMutators(config, this.mutators));
     this.sim.setAllocation("gather", 4);
     this.sim.setAllocation("hunt", 2);
     this.sim.setAllocation("research", 2);
@@ -89,6 +96,10 @@ export class GameController {
   /** Choose the start scenario; applies to the next run started. */
   setScenario(s: Scenario): void {
     this.scenario = s;
+  }
+  /** Choose the toggled run mutators; applies to the next run started. */
+  setMutators(m: MutatorId[]): void {
+    this.mutators = m;
   }
   adjustTask(task: Task, delta: number): void {
     this.sim.setAllocation(task, this.sim.allocation[task] + delta);
