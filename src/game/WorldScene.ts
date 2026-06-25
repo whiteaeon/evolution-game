@@ -28,12 +28,16 @@ import {
   notableById,
   selectLeader,
   leaderBonus,
+  shiftRelations,
+  rivalRegion,
   type Biome,
   type Individual,
   type LeaderBonus,
   type Notable,
+  type RivalTribe,
   type TechId,
 } from "../sim/index.js";
+import { dispositionStyle } from "../ui/diplomacy.js";
 import type { GameController } from "./controller.js";
 
 /** Camera viewport (the canvas). The world below is several screens wide. */
@@ -104,6 +108,11 @@ const RITUAL_FOOD = 6;
 const RITUAL_CULTURE = 14; // belief gained per ritual (mirrors the sim's cultureRitual)
 const RITUAL_RANGE = 48; // how close to a fire you must stand to hold one
 const RITUAL_COOLDOWN_MS = 600; // a brief pause between rituals
+/** A gift to the neighbour camp: an offering of food that warms relations. */
+const GIFT_FOOD = 6; // mirrors the sim's diploReciprocateCost
+const GIFT_RELATIONS = 0.2; // relations warmed per gift (mirrors the sim's diploRelUp)
+const GIFT_RANGE = 56; // how close to the neighbour camp you must stand
+const GIFT_COOLDOWN_MS = 600; // a brief pause between gifts
 /** Particle tint per resource — woody brown, leafy green, cool grey stone. */
 const RES_COLOR: Record<ResKind, number> = { wood: 0xb5793b, food: 0x6fcf57, stone: 0xc2c6cf };
 /** Floating-gain text colour per resource (a brighter sibling of the particle). */
@@ -270,6 +279,17 @@ export class WorldScene extends Phaser.Scene {
   private researchHud!: Phaser.GameObjects.Text;
   private campFireLit = false; // camp hearth shown once 'fire' is known
 
+  // Rivals: one neighbour tribe (from the sim's dormant rivals data) gets a
+  // reachable camp out in the world, with its disposition shown. Standing near it
+  // and pressing G sends a gift of food that warms the player-relations the sim
+  // already tracks (shiftRelations) — a real, persisted diplomacy outcome.
+  private rival: RivalTribe | null = null;
+  private rivalCamp: { x: number; y: number } | null = null;
+  private rivalLabel!: Phaser.GameObjects.Text; // floating name/disposition/relations over the camp
+  private giftKey!: Phaser.Input.Keyboard.Key;
+  private giftCooldown = 0;
+  private giftPrompt!: Phaser.GameObjects.Text;
+
   constructor() {
     super("world");
   }
@@ -297,6 +317,7 @@ export class WorldScene extends Phaser.Scene {
     this.markNotables();
     this.spawnPlayer();
     this.placeTotem();
+    this.placeRivalCamp();
     this.buildFog();
     this.buildHud();
     this.buildDayNight();
@@ -327,6 +348,7 @@ export class WorldScene extends Phaser.Scene {
     };
     this.gatherKey = this.key("SPACE");
     this.ritualKey = this.key("R");
+    this.giftKey = this.key("G");
 
     // One handler does both jobs: a click on a tribe member talks; a click on the
     // ground walks there. `currentlyOver` is every interactive object under the
@@ -654,8 +676,21 @@ export class WorldScene extends Phaser.Scene {
       .setDepth(UI_DEPTH)
       .setVisible(false);
 
+    this.giftPrompt = this.add
+      .text(0, 0, "", {
+        fontFamily: "monospace",
+        fontSize: "11px",
+        color: "#cfe0a8",
+        backgroundColor: "#000000aa",
+        padding: { x: 4, y: 2 },
+      })
+      .setOrigin(0.5, 1)
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH)
+      .setVisible(false);
+
     this.add
-      .text(VIEW_W / 2, 28, "WASD/click move · click a villager · Space gather · R ritual · build bar · L quests · T research", {
+      .text(VIEW_W / 2, 28, "WASD/click move · click a villager · Space gather · R ritual · G gift · build bar · L quests · T research", {
         fontFamily: "monospace",
         fontSize: "10px",
         color: "#cfe0d0",
@@ -1117,6 +1152,7 @@ export class WorldScene extends Phaser.Scene {
     this.updateNpcs(dt);
     this.updateGather(dt);
     this.updateRitual(dt);
+    this.updateDiplomacy(dt);
     this.updateQuests();
     this.updateInspectMarks();
     this.revealFog();
@@ -1725,6 +1761,118 @@ export class WorldScene extends Phaser.Scene {
       ease: "Quad.easeOut",
       onComplete: () => ring.destroy(),
     });
+  }
+
+  // ── rivals (neighbour diplomacy) ─────────────────────────────────────────────
+
+  /**
+   * Surface the sim's dormant rivals data: give the first neighbour tribe a
+   * reachable camp out in the world (a clearing away from the player's camp and
+   * any terrain), label it with the tribe's name and current disposition, and add
+   * its hut as a solid so the diplomacy spot reads as a real place.
+   */
+  private placeRivalCamp(): void {
+    const rival = this.ctrl.sim.state.rivals[0];
+    if (!rival) return;
+    this.rival = rival;
+    // Pick the first candidate clearing that is well clear of the player's camp
+    // and any terrain solid; the spread guarantees a reachable spot in every biome.
+    const candidates: [number, number][] = [
+      [240, 240],
+      [WORLD_W - 240, 240],
+      [240, WORLD_H - 220],
+      [WORLD_W - 240, WORLD_H - 220],
+      [WORLD_W - 260, CAMP.y],
+      [260, CAMP.y],
+    ];
+    let spot = candidates[0];
+    for (const c of candidates) {
+      const clearOfTerrain = !this.solids.some(
+        (s) => Phaser.Math.Distance.Between(c[0], c[1], s.x, s.y) < s.r + 40,
+      );
+      if (clearOfTerrain && Phaser.Math.Distance.Between(c[0], c[1], CAMP.x, CAMP.y) > 360) {
+        spot = c;
+        break;
+      }
+    }
+    const [x, y] = spot;
+    this.rivalCamp = { x, y };
+    this.add.image(x, y, "shelter-village").setOrigin(0.5, 0.9).setDepth(y);
+    this.add.image(x - 30, y + 10, "shelter-hut").setOrigin(0.5, 0.9).setDepth(y + 10);
+    this.solids.push({ x, y: y - 6, r: 16 });
+    this.rivalLabel = this.add
+      .text(x, y - 40, "", {
+        fontFamily: "monospace",
+        fontSize: "11px",
+        color: "#e9e0c8",
+        align: "center",
+        backgroundColor: "#00000088",
+        padding: { x: 4, y: 2 },
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(y + 2);
+    this.updateRivalLabel();
+  }
+
+  /** Redraw the neighbour camp's banner: name, disposition (their mood) and the
+   *  player-built relations the gift action moves. */
+  private updateRivalLabel(): void {
+    const r = this.rival;
+    if (!r || !this.rivalLabel) return;
+    const d = dispositionStyle(r.disposition);
+    this.rivalLabel
+      .setText(`${r.name} · ${rivalRegion(r).name}\n${d.icon} ${d.label}  ·  relations ${r.relations.toFixed(2)}`)
+      .setColor(d.color);
+  }
+
+  /** Show the gift prompt when near the neighbour camp and send a gift on G. */
+  private updateDiplomacy(dt: number): void {
+    if (this.giftCooldown > 0) this.giftCooldown -= dt;
+    const camp = this.rivalCamp;
+    if (!camp || this.dialogOpen || this.techPanelOpen || this.inspectOpen || this.buildMode) {
+      this.giftPrompt.setVisible(false);
+      return;
+    }
+    const near = Phaser.Math.Distance.Between(this.player.x, this.player.y, camp.x, camp.y) < GIFT_RANGE;
+    if (!near) {
+      this.giftPrompt.setVisible(false);
+      return;
+    }
+    const cam = this.cameras.main;
+    const ready = this.giftCooldown <= 0;
+    this.giftPrompt
+      .setText(ready ? `G: send a gift (−${GIFT_FOOD} food → relations warm)` : "…")
+      .setAlpha(ready ? 1 : 0.6)
+      .setPosition(camp.x - cam.scrollX, camp.y - cam.scrollY - 48)
+      .setVisible(true);
+    if (ready && Phaser.Input.Keyboard.JustDown(this.giftKey)) this.sendGift();
+  }
+
+  /** Offer food to the neighbour camp, warming the sim's player-relations score. */
+  private sendGift(): void {
+    const rival = this.rival;
+    const camp = this.rivalCamp;
+    if (!rival || !camp) return;
+    const sim = this.ctrl.sim;
+    if (Math.floor(sim.state.resources.food) < GIFT_FOOD) {
+      this.flash(`Need ${GIFT_FOOD} food to send a gift`);
+      this.buildSfx(false);
+      return;
+    }
+    sim.state.resources.food -= GIFT_FOOD;
+    const before = rival.relations;
+    shiftRelations(rival, GIFT_RELATIONS); // the sim's one place relations ever moves
+    this.giftCooldown = GIFT_COOLDOWN_MS;
+    const gained = rival.relations - before; // less than the delta once clamped at +1
+    this.floatGain(
+      camp.x,
+      camp.y - 20,
+      gained > 0.001 ? `+${gained.toFixed(2)} relations` : "relations maxed",
+      "#a9cf6a",
+    );
+    this.popParticles(camp.x, camp.y - 12, 0x9fe070);
+    this.buildSfx(true);
+    this.updateRivalLabel();
   }
 
   /** A small radial burst of fading dots at a world point — the gather "pop". */
