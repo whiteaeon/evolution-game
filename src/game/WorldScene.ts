@@ -42,6 +42,19 @@ const DECOR_BY_BIOME: Record<Biome, string[]> = {
   coast: ["bush", "tree", "rock"],
 };
 
+/** Placeable structures. Cost is paid from the tribe's food stores for now. */
+interface BuildType {
+  id: string;
+  label: string;
+  icon: string; // texture key
+  cost: number; // food
+}
+const BUILD_TYPES: BuildType[] = [
+  { id: "campfire", label: "Campfire", icon: "fire-0", cost: 4 },
+  { id: "hut", label: "Hut", icon: "shelter-hut", cost: 12 },
+  { id: "farm", label: "Farm", icon: "crop", cost: 8 },
+];
+
 interface Npc {
   ind: Individual;
   sprite: Phaser.GameObjects.Image;
@@ -78,6 +91,10 @@ export class WorldScene extends Phaser.Scene {
 
   private hud!: Phaser.GameObjects.Text;
 
+  private buildMode: BuildType | null = null;
+  private ghost!: Phaser.GameObjects.Image;
+  private buildBtns: { type: BuildType; bg: Phaser.GameObjects.Rectangle }[] = [];
+
   constructor() {
     super("world");
   }
@@ -106,6 +123,13 @@ export class WorldScene extends Phaser.Scene {
     this.buildFog();
     this.buildHud();
     this.buildDialog();
+    this.buildBuildBar();
+    this.ghost = this.add
+      .image(0, 0, "fire-0")
+      .setOrigin(0.5, 0.85)
+      .setAlpha(0.55)
+      .setDepth(FOG_DEPTH - 1)
+      .setVisible(false);
 
     this.keys = {
       up: [this.key("W"), this.key("UP")],
@@ -124,6 +148,15 @@ export class WorldScene extends Phaser.Scene {
           this.closeDialog();
           return;
         }
+        const btn = currentlyOver.find((o) => o.getData("buildBtn") !== undefined);
+        if (btn) {
+          this.toggleBuild(btn.getData("buildBtn") as string);
+          return;
+        }
+        if (this.buildMode) {
+          this.tryPlace(pointer);
+          return;
+        }
         const hit = currentlyOver.find((o) => o.getData("npcId") !== undefined);
         if (hit) {
           const id = hit.getData("npcId") as number;
@@ -134,6 +167,8 @@ export class WorldScene extends Phaser.Scene {
         this.moveTarget = { x: pointer.worldX, y: pointer.worldY };
       },
     );
+    this.input.on("pointermove", (p: Phaser.Input.Pointer) => this.updateGhost(p));
+    this.input.keyboard!.on("keydown-ESC", () => this.cancelBuild());
   }
 
   private key(name: string): Phaser.Input.Keyboard.Key {
@@ -256,14 +291,14 @@ export class WorldScene extends Phaser.Scene {
       .setDepth(UI_DEPTH);
 
     this.add
-      .text(VIEW_W / 2, VIEW_H - 12, "WASD / click to move  ·  click a tribe member to talk", {
+      .text(VIEW_W / 2, 28, "WASD / click to move  ·  click a villager to talk  ·  build from the bar (Esc cancels)", {
         fontFamily: "monospace",
-        fontSize: "11px",
+        fontSize: "10px",
         color: "#cfe0d0",
         backgroundColor: "#00000066",
         padding: { x: 6, y: 3 },
       })
-      .setOrigin(0.5, 1)
+      .setOrigin(0.5, 0)
       .setScrollFactor(0)
       .setDepth(UI_DEPTH);
 
@@ -359,6 +394,110 @@ export class WorldScene extends Phaser.Scene {
     return `${byTrait[top] ?? "We follow you, chieftain."}  (${era}, age ${ind.age})`;
   }
 
+  // ── building ───────────────────────────────────────────────────────────────
+
+  private buildBuildBar(): void {
+    const y = VIEW_H - 44;
+    BUILD_TYPES.forEach((t, i) => {
+      const bx = 10 + i * 60;
+      const bg = this.add
+        .rectangle(bx, y, 56, 30, 0x12180e, 0.7)
+        .setOrigin(0, 0)
+        .setStrokeStyle(1, 0x6f8c5a)
+        .setScrollFactor(0)
+        .setDepth(UI_DEPTH)
+        .setInteractive({ useHandCursor: true });
+      bg.setData("buildBtn", t.id);
+      this.add
+        .image(bx + 13, y + 15, t.icon)
+        .setDisplaySize(16, 16)
+        .setScrollFactor(0)
+        .setDepth(UI_DEPTH + 1);
+      this.add
+        .text(bx + 24, y + 5, `${t.label}\n${t.cost} food`, {
+          fontFamily: "monospace",
+          fontSize: "8px",
+          color: "#e9e0c8",
+          lineSpacing: 2,
+        })
+        .setScrollFactor(0)
+        .setDepth(UI_DEPTH + 1);
+      this.buildBtns.push({ type: t, bg });
+    });
+  }
+
+  private toggleBuild(id: string): void {
+    const t = BUILD_TYPES.find((b) => b.id === id);
+    if (!t) return;
+    if (this.buildMode?.id === id) {
+      this.cancelBuild();
+      return;
+    }
+    this.buildMode = t;
+    this.ghost.setTexture(t.icon).setVisible(true);
+    this.highlightBuildBtns();
+  }
+
+  private cancelBuild(): void {
+    this.buildMode = null;
+    this.ghost.setVisible(false);
+    this.highlightBuildBtns();
+  }
+
+  private highlightBuildBtns(): void {
+    for (const b of this.buildBtns) {
+      const on = b.type.id === this.buildMode?.id;
+      b.bg.setStrokeStyle(on ? 2 : 1, on ? 0xffe08a : 0x6f8c5a);
+    }
+  }
+
+  private snap(v: number): number {
+    return Math.floor(v / TILE) * TILE + TILE / 2;
+  }
+
+  private updateGhost(p: Phaser.Input.Pointer): void {
+    if (!this.buildMode) return;
+    this.ghost.setPosition(this.snap(p.worldX), this.snap(p.worldY));
+    const ok = this.ctrl.sim.state.resources.food >= this.buildMode.cost;
+    this.ghost.setTint(ok ? 0x88ff88 : 0xff7a7a);
+  }
+
+  private tryPlace(p: Phaser.Input.Pointer): void {
+    const t = this.buildMode;
+    if (!t) return;
+    if (this.ctrl.sim.state.resources.food < t.cost) {
+      this.flash("Not enough food");
+      return;
+    }
+    this.ctrl.sim.state.resources.food -= t.cost;
+    const wy = this.snap(p.worldY);
+    this.add.image(this.snap(p.worldX), wy, t.icon).setOrigin(0.5, 0.85).setDepth(wy);
+    this.flash(`${t.label} built`);
+    this.updateGhost(p); // refresh the affordability tint after spending
+  }
+
+  private flash(msg: string): void {
+    const txt = this.add
+      .text(VIEW_W / 2, 64, msg, {
+        fontFamily: "monospace",
+        fontSize: "12px",
+        color: "#fff4d6",
+        backgroundColor: "#000000aa",
+        padding: { x: 6, y: 3 },
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH + 5);
+    this.tweens.add({
+      targets: txt,
+      y: 44,
+      alpha: 0,
+      duration: 1300,
+      ease: "Sine.easeOut",
+      onComplete: () => txt.destroy(),
+    });
+  }
+
   // ── per-frame ──────────────────────────────────────────────────────────────
 
   override update(_t: number, dt: number): void {
@@ -429,6 +568,8 @@ export class WorldScene extends Phaser.Scene {
 
   private syncHud(): void {
     const s = this.ctrl.sim.state;
-    this.hud.setText(`${s.era}   👥 ${this.ctrl.sim.living.length}   ${s.biome}`);
+    this.hud.setText(
+      `${s.era}   👥 ${this.ctrl.sim.living.length}   🍖 ${Math.floor(s.resources.food)}   ${s.biome}`,
+    );
   }
 }
