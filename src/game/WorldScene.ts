@@ -39,6 +39,7 @@ import {
   type TechId,
 } from "../sim/index.js";
 import { dispositionStyle } from "../ui/diplomacy.js";
+import { WorldAudio } from "../ui/audio.js";
 import type { GameController } from "./controller.js";
 
 /** Camera viewport (the canvas). The world below is several screens wide. */
@@ -254,7 +255,11 @@ export class WorldScene extends Phaser.Scene {
   private campfires: { x: number; y: number }[] = []; // fires villagers cluster at after dark
   private gatherKey!: Phaser.Input.Keyboard.Key;
   private gatherCooldown = 0;
-  private sfxCtx: AudioContext | null = null;
+  // Diegetic audio: synthesized SFX + a biome/time-of-day ambient bed, silent
+  // until a user gesture resumes it and behind the mute toggle (see ../ui/audio).
+  private audio = new WorldAudio();
+  private muteBtn!: Phaser.GameObjects.Text;
+  private lastStepIdx = 0; // last footstep the walk-bob crossed, so each step sounds once
   private gatherPrompt!: Phaser.GameObjects.Text;
   private resHud!: Phaser.GameObjects.Text;
   private housing = 0;
@@ -335,6 +340,7 @@ export class WorldScene extends Phaser.Scene {
   create(): void {
     this.ctrl = this.registry.get("controller") as GameController;
     const biome = this.ctrl.sim.state.biome;
+    this.audio.setBiome(biome); // colour the ambient bed for this world's biome
 
     makeBiomeTextures(this);
     makeDecorTextures(this);
@@ -395,6 +401,11 @@ export class WorldScene extends Phaser.Scene {
     this.input.on(
       "pointerdown",
       (pointer: Phaser.Input.Pointer, currentlyOver: Phaser.GameObjects.GameObject[]) => {
+        this.audio.resume(); // a click is a user gesture — opens audio (browser autoplay)
+        if (currentlyOver.some((o) => o.getData("muteBtn"))) {
+          this.toggleMute();
+          return;
+        }
         if (currentlyOver.some((o) => o.getData("tutorialSkip"))) {
           this.endTutorial(false);
           return;
@@ -457,6 +468,9 @@ export class WorldScene extends Phaser.Scene {
     });
     this.input.keyboard!.on("keydown-L", () => this.toggleQuestLog());
     this.input.keyboard!.on("keydown-T", () => this.toggleTechPanel());
+    this.input.keyboard!.on("keydown-M", () => this.toggleMute());
+    // Any key press is a user gesture, so movement keys enable audio too.
+    this.input.keyboard!.on("keydown", () => this.audio.resume());
 
     // First run only: teach the core loop with a dismissible staged overlay.
     if (!tutorialSeen()) this.startTutorial();
@@ -767,7 +781,7 @@ export class WorldScene extends Phaser.Scene {
       .setVisible(false);
 
     this.add
-      .text(VIEW_W / 2, 28, "WASD/click move · click a villager · Space gather · R ritual · G gift · F rally · build bar · L quests · T research", {
+      .text(VIEW_W / 2, 28, "WASD/click move · click a villager · Space gather · R ritual · G gift · F rally · build bar · L quests · T research · M sound", {
         fontFamily: "monospace",
         fontSize: "10px",
         color: "#cfe0d0",
@@ -801,6 +815,26 @@ export class WorldScene extends Phaser.Scene {
       .setOrigin(0.5, 1)
       .setDepth(UI_DEPTH)
       .setVisible(false);
+
+    // Sound toggle (also "M"): starts unmuted, but audio stays silent until a
+    // user gesture resumes it per browser autoplay rules.
+    this.muteBtn = this.add
+      .text(VIEW_W - 8, 8, "🔊", {
+        fontFamily: "monospace",
+        fontSize: "14px",
+        backgroundColor: "#00000066",
+        padding: { x: 5, y: 3 },
+      })
+      .setOrigin(1, 0)
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH)
+      .setInteractive({ useHandCursor: true });
+    this.muteBtn.setData("muteBtn", true);
+  }
+
+  /** Flip the sound on/off and reflect it on the HUD button. */
+  private toggleMute(): void {
+    this.muteBtn.setText(this.audio.toggleMute() ? "🔇" : "🔊");
   }
 
   private buildDialog(): void {
@@ -913,6 +947,7 @@ export class WorldScene extends Phaser.Scene {
     q.state = "active";
     q.start = questMetric(q, this.questMetrics());
     this.flash(`Task accepted: ${q.desc}`);
+    this.audio.questAccept();
     this.tutorialEvent("quest");
   }
 
@@ -921,6 +956,7 @@ export class WorldScene extends Phaser.Scene {
     q.state = "done";
     this.ctrl.sim.state.resources[q.reward.res] += q.reward.amount;
     this.flash(`Quest complete! +${q.reward.amount} ${q.reward.res}`);
+    this.audio.questComplete();
   }
 
   private closeDialog(): void {
@@ -1042,14 +1078,14 @@ export class WorldScene extends Phaser.Scene {
       }
     }
     this.dustBurst(wx, wy); // a kick of dust as it lands
-    this.buildSfx(true);
+    this.audio.build(true);
     this.updateGhost(p); // refresh the affordability tint after spending
   }
 
   /** Refuse a placement loudly: reason text, a red ghost shake, and a low buzz. */
   private denyBuild(reason: string): void {
     this.flash(reason);
-    this.buildSfx(false);
+    this.audio.build(false);
     const gx = this.ghost.x;
     this.ghost.setTint(0xff5a5a);
     this.tweens.add({
@@ -1097,35 +1133,6 @@ export class WorldScene extends Phaser.Scene {
         ease: "Quad.easeOut",
         onComplete: () => dot.destroy(),
       });
-    }
-  }
-
-  /** A built/denied cue: a solid "thunk" on success, a short buzz on refusal.
-   *  Fired inside the click gesture, so browser autoplay rules are satisfied. */
-  private buildSfx(ok: boolean): void {
-    try {
-      if (!this.sfxCtx) {
-        const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-        if (!Ctor) return;
-        this.sfxCtx = new Ctor();
-      }
-      const ctx = this.sfxCtx;
-      if (ctx.state === "suspended") void ctx.resume();
-      const now = ctx.currentTime;
-      const osc = ctx.createOscillator();
-      const g = ctx.createGain();
-      osc.type = ok ? "square" : "sawtooth";
-      const dur = ok ? 0.22 : 0.16;
-      osc.frequency.setValueAtTime(ok ? 170 : 130, now);
-      osc.frequency.exponentialRampToValueAtTime(ok ? 60 : 80, now + dur * 0.8);
-      g.gain.setValueAtTime(0.0001, now);
-      g.gain.linearRampToValueAtTime(ok ? 0.09 : 0.05, now + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-      osc.connect(g).connect(ctx.destination);
-      osc.start(now);
-      osc.stop(now + dur + 0.02);
-    } catch {
-      /* audio unavailable */
     }
   }
 
@@ -1664,12 +1671,12 @@ export class WorldScene extends Phaser.Scene {
     }
     if (Math.floor(sim.state.resources.food) < STUDY_FOOD) {
       this.flash(`Need ${STUDY_FOOD} food to study`);
-      this.buildSfx(false);
+      this.audio.build(false);
       return;
     }
     sim.state.resources.food -= STUDY_FOOD;
     const completed = sim.fundResearch(STUDY_POINTS);
-    this.buildSfx(true);
+    this.audio.build(true);
     if (completed) this.onTechDiscovered(completed);
     this.refreshTechPanel();
   }
@@ -1735,7 +1742,7 @@ export class WorldScene extends Phaser.Scene {
     const py = spr.y - spr.displayHeight * 0.5; // burst from the node's middle
     this.floatGain(px, py, `+${amt} ${node.kind}`, RES_TEXT[node.kind]);
     this.popParticles(px, py, RES_COLOR[node.kind]);
-    this.gatherSfx(node.kind);
+    this.audio.gather(node.kind);
 
     if (node.amount <= 0) {
       // Depleted: a final pop, then clearly wilt away — shrink, tip and fade out.
@@ -1840,7 +1847,7 @@ export class WorldScene extends Phaser.Scene {
     const sim = this.ctrl.sim;
     if (Math.floor(sim.state.resources.food) < RITUAL_FOOD) {
       this.flash(`Need ${RITUAL_FOOD} food to hold a ritual`);
-      this.buildSfx(false);
+      this.audio.build(false);
       return;
     }
     sim.state.resources.food -= RITUAL_FOOD;
@@ -1850,7 +1857,7 @@ export class WorldScene extends Phaser.Scene {
 
     this.floatGain(fire.x, fire.y - 14, `+${RITUAL_CULTURE} belief`, "#d9b3ff");
     this.popParticles(fire.x, fire.y - 8, 0xb98cff);
-    this.buildSfx(true);
+    this.audio.build(true);
     if (sim.state.culture.level() > before) {
       this.onBeliefMilestone(sim.state.culture.stage()!, fire);
     }
@@ -1968,7 +1975,7 @@ export class WorldScene extends Phaser.Scene {
     const sim = this.ctrl.sim;
     if (Math.floor(sim.state.resources.food) < GIFT_FOOD) {
       this.flash(`Need ${GIFT_FOOD} food to send a gift`);
-      this.buildSfx(false);
+      this.audio.build(false);
       return;
     }
     sim.state.resources.food -= GIFT_FOOD;
@@ -1983,7 +1990,7 @@ export class WorldScene extends Phaser.Scene {
       "#a9cf6a",
     );
     this.popParticles(camp.x, camp.y - 12, 0x9fe070);
-    this.buildSfx(true);
+    this.audio.build(true);
     this.updateRivalLabel();
   }
 
@@ -2060,7 +2067,7 @@ export class WorldScene extends Phaser.Scene {
       .setDepth(camp.y);
     this.raidBanner.setVisible(true);
     this.flash(`${rival.name} are raiding! Rally at the hearth (F)`);
-    this.buildSfx(false);
+    this.audio.raidWarn();
   }
 
   /** Muster the nearest villager not yet defending to fall back to the hearth. */
@@ -2087,7 +2094,7 @@ export class WorldScene extends Phaser.Scene {
     next.ty = Phaser.Math.Clamp(CAMP.y + 30 + Math.sin(a) * 28, 50, WORLD_H - 20);
     next.workT = 0;
     this.floatGain(next.sprite.x, next.sprite.y - 18, "to arms!", "#ffd2c2");
-    this.buildSfx(true);
+    this.audio.build(true);
   }
 
   /**
@@ -2116,7 +2123,7 @@ export class WorldScene extends Phaser.Scene {
 
     this.cameras.main.shake(260, 0.006);
     this.popParticles(CAMP.x, CAMP.y - 6, outcome.won ? 0x9fe070 : 0xff6a4a);
-    this.buildSfx(outcome.won);
+    this.audio.raidResolve(outcome.won);
     this.flash(
       outcome.won
         ? `${rival.name} are driven off! The camp holds.`
@@ -2192,35 +2199,6 @@ export class WorldScene extends Phaser.Scene {
     });
   }
 
-  /** A soft synthesized "tock", pitched per resource. Lazily opened on first use
-   *  — always within the Space-key gesture, so browser autoplay rules are met. */
-  private gatherSfx(kind: ResKind): void {
-    try {
-      if (!this.sfxCtx) {
-        const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-        if (!Ctor) return;
-        this.sfxCtx = new Ctor();
-      }
-      const ctx = this.sfxCtx;
-      if (ctx.state === "suspended") void ctx.resume();
-      const base = { wood: 220, food: 330, stone: 165 }[kind];
-      const osc = ctx.createOscillator();
-      const g = ctx.createGain();
-      osc.type = "triangle";
-      const now = ctx.currentTime;
-      osc.frequency.setValueAtTime(base, now);
-      osc.frequency.exponentialRampToValueAtTime(base * 1.5, now + 0.08);
-      g.gain.setValueAtTime(0.0001, now);
-      g.gain.linearRampToValueAtTime(0.06, now + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
-      osc.connect(g).connect(ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.2);
-    } catch {
-      /* audio unavailable */
-    }
-  }
-
   private movePlayer(dt: number): void {
     const sec = dt / 1000;
     let dx = 0;
@@ -2292,6 +2270,12 @@ export class WorldScene extends Phaser.Scene {
       this.bobPhase += (speed / PLAYER_SPEED) * dt * 0.013;
       const amp = 0.045 * Math.min(1, speed / PLAYER_SPEED);
       this.player.scaleY = PLAYER_SCALE * (1 + Math.abs(Math.sin(this.bobPhase)) * amp);
+      // Sound one footstep per half-bob, so each planted foot ticks once.
+      const stepIdx = Math.floor(this.bobPhase / Math.PI);
+      if (stepIdx !== this.lastStepIdx) {
+        this.lastStepIdx = stepIdx;
+        this.audio.footstep();
+      }
     } else {
       this.vx = 0;
       this.vy = 0;
@@ -2385,6 +2369,7 @@ export class WorldScene extends Phaser.Scene {
   /** Advance the clock and apply the tint, the lit campfires/huts, and the HUD. */
   private updateDayNight(dt: number): void {
     this.dayTime = (this.dayTime + dt / DAY_LENGTH_MS) % 1;
+    this.audio.setTimeOfDay(this.dayTime); // brighten/hush the ambient bed with the sky
     const { color, alpha } = this.ambientAt(this.dayTime);
     this.ambient.setFillStyle(color, alpha);
     // 1 at midnight, 0 at noon — drives how strongly the warm lights glow.

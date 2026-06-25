@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { eraMusic } from "./audio.js";
+import { eraMusic, WorldAudio } from "./audio.js";
 import { ERAS } from "../sim/index.js";
 
 describe("eraMusic", () => {
@@ -32,5 +32,42 @@ describe("eraMusic", () => {
     expect(eraMusic(-5)).toEqual(eraMusic(0));
     expect(eraMusic(999)).toEqual(eraMusic(ERAS.length - 1));
     expect(eraMusic(2.9)).toEqual(eraMusic(2)); // floors fractional indices
+  });
+});
+
+describe("WorldAudio", () => {
+  it("starts unmuted and the toggle flips and reports the state", () => {
+    const a = new WorldAudio();
+    expect(a.muted).toBe(false);
+    expect(a.toggleMute()).toBe(true);
+    expect(a.muted).toBe(true);
+    expect(a.toggleMute()).toBe(false);
+    expect(a.muted).toBe(false);
+  });
+
+  it("is a safe no-op without WebAudio: no method throws, muted or not", () => {
+    // The node test env has no `window`/AudioContext, so every call should fall
+    // through harmlessly — proving the facility never crashes the scene.
+    const exercise = (a: WorldAudio) => {
+      a.resume();
+      a.footstep();
+      a.gather("wood");
+      a.gather("stone");
+      a.build(true);
+      a.build(false);
+      a.questAccept();
+      a.questComplete();
+      a.raidWarn();
+      a.raidResolve(true);
+      a.raidResolve(false);
+      a.setBiome("forest");
+      a.setBiome("desert");
+      a.setTimeOfDay(0.5);
+      a.setTimeOfDay(0.0);
+    };
+    const a = new WorldAudio();
+    expect(() => exercise(a)).not.toThrow();
+    a.toggleMute(); // muted
+    expect(() => exercise(a)).not.toThrow();
   });
 });

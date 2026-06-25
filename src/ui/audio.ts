@@ -275,3 +275,260 @@ export class Audio {
     });
   }
 }
+
+/**
+ * Per-biome character of the world ambient bed: a root note and a timbre. The
+ * drone is tuned to these so each biome has its own colour — bare sine drones
+ * for the cold/sparse biomes, warmer triangle drones for the lush ones.
+ */
+const BIOME_AMBIENCE: Record<string, { root: number; wave: OscillatorType }> = {
+  tundra: { root: 98.0, wave: "sine" }, // G2 — bare and cold
+  forest: { root: 110.0, wave: "triangle" }, // A2 — warm and full
+  river: { root: 123.5, wave: "sine" }, // B2 — flowing
+  grassland: { root: 130.8, wave: "triangle" }, // C3 — open and bright
+  desert: { root: 87.3, wave: "sine" }, // F2 — sparse and hollow
+  coast: { root: 116.5, wave: "triangle" }, // A#2 — airy
+};
+const DEFAULT_AMBIENCE = BIOME_AMBIENCE.grassland;
+
+/** Live nodes of the world ambient bed, kept so it can be retuned and stopped. */
+interface Bed {
+  voices: OscillatorNode[];
+  breath: OscillatorNode;
+  filter: BiquadFilterNode;
+  master: GainNode;
+}
+
+/**
+ * Diegetic audio for the interactive WorldScene: short synthesized SFX for the
+ * chieftain's actions (footstep, gather, build, quests, raids) and a gentle
+ * ambient drone bed that shifts with the biome and the time of day. All sound is
+ * silent until {@link resume} is called from a user gesture (browser autoplay)
+ * and behind a {@link toggleMute} switch. No external assets — pure WebAudio.
+ */
+export class WorldAudio {
+  private ctx: AudioContext | null = null;
+  muted = false;
+  private bed: Bed | null = null;
+  private biome = DEFAULT_AMBIENCE;
+  private bright = 0.5; // 0 = deep night, 1 = noon; drives cutoff + volume
+  private lastBright = -1; // brightness last applied to the bed, for throttling
+
+  /** Lazily create (and resume) the context. Null while muted or unavailable. */
+  private ensure(): AudioContext | null {
+    if (this.muted) return null;
+    if (!this.ctx) {
+      try {
+        const Ctor =
+          window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (!Ctor) return null;
+        this.ctx = new Ctor();
+      } catch {
+        return null;
+      }
+    }
+    if (this.ctx.state === "suspended") void this.ctx.resume();
+    return this.ctx;
+  }
+
+  /**
+   * Call from any user-gesture handler: opens/resumes the context and starts the
+   * ambient bed unless muted. Idempotent and cheap, so it is safe to call on
+   * every click and key press.
+   */
+  resume(): void {
+    if (this.muted) return;
+    if (!this.ensure()) return;
+    if (!this.bed) this.startBed();
+  }
+
+  /** Flip the mute toggle: silences or restores all sound. Returns the new state. */
+  toggleMute(): boolean {
+    this.muted = !this.muted;
+    if (this.muted) this.stopBed();
+    else this.resume();
+    return this.muted;
+  }
+
+  // ── short SFX ──────────────────────────────────────────────────────────────
+
+  /** One soft enveloped tone — the workhorse behind the action SFX. */
+  private tone(o: {
+    freq: number;
+    to?: number;
+    dur: number;
+    gain?: number;
+    type?: OscillatorType;
+    delay?: number;
+  }): void {
+    const ctx = this.ensure();
+    if (!ctx) return;
+    const { freq, to = freq, dur, gain = 0.05, type = "sine", delay = 0 } = o;
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = type;
+    const t = ctx.currentTime + delay;
+    osc.frequency.setValueAtTime(freq, t);
+    if (to !== freq) osc.frequency.exponentialRampToValueAtTime(to, t + dur * 0.8);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(gain, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
+  }
+
+  /** A subtle low thump as the chieftain's foot plants. */
+  footstep(): void {
+    this.tone({ freq: 92, to: 58, dur: 0.09, gain: 0.022, type: "sine" });
+  }
+
+  /** A crisp "tock" pitched per resource as a node is harvested. */
+  gather(kind: "wood" | "food" | "stone"): void {
+    const base = { wood: 220, food: 330, stone: 165 }[kind];
+    this.tone({ freq: base, to: base * 1.5, dur: 0.18, gain: 0.06, type: "triangle" });
+  }
+
+  /** A solid "thunk" on a successful action, a short low buzz on a refusal. */
+  build(ok: boolean): void {
+    this.tone({
+      freq: ok ? 170 : 130,
+      to: ok ? 60 : 80,
+      dur: ok ? 0.22 : 0.16,
+      gain: ok ? 0.09 : 0.05,
+      type: ok ? "square" : "sawtooth",
+    });
+  }
+
+  /** A soft two-note rise marking a quest accepted. */
+  questAccept(): void {
+    this.tone({ freq: 392, dur: 0.16, gain: 0.04, type: "sine" });
+    this.tone({ freq: 523, dur: 0.28, gain: 0.04, type: "sine", delay: 0.1 });
+  }
+
+  /** A bright little fanfare marking a quest turned in. */
+  questComplete(): void {
+    [523, 659, 784].forEach((f, i) => this.tone({ freq: f, dur: 0.3, gain: 0.05, type: "triangle", delay: i * 0.1 }));
+  }
+
+  /** A low, ominous double horn warning that raiders have been sighted. */
+  raidWarn(): void {
+    this.tone({ freq: 140, to: 96, dur: 0.6, gain: 0.07, type: "sawtooth" });
+    this.tone({ freq: 110, to: 80, dur: 0.7, gain: 0.06, type: "sawtooth", delay: 0.34 });
+  }
+
+  /** Raid resolved: a bright rising triad on a win, a low fall on a loss. */
+  raidResolve(won: boolean): void {
+    const notes = won ? [330, 440, 587] : [196, 165, 123];
+    notes.forEach((f, i) =>
+      this.tone({ freq: f, dur: won ? 0.26 : 0.36, gain: 0.06, type: won ? "triangle" : "sawtooth", delay: i * 0.1 }),
+    );
+  }
+
+  // ── ambient bed ──────────────────────────────────────────────────────────────
+
+  /** Filter cutoff for the current brightness — darker at night, open at noon. */
+  private cutoff(): number {
+    return 300 + 900 * this.bright;
+  }
+
+  /** Overall bed volume for the current brightness — hushed at night. */
+  private level(): number {
+    return 0.016 + 0.014 * this.bright;
+  }
+
+  /** Start the gentle drone: root + fifth + octave through a lowpass, with a slow
+   *  breathing LFO on the volume. Only ever runs while unmuted and resumed. */
+  private startBed(): void {
+    const ctx = this.ctx;
+    if (!ctx || this.bed) return;
+
+    const master = ctx.createGain();
+    master.gain.value = 0.0001;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.Q.value = 0.5;
+    filter.connect(master).connect(ctx.destination);
+
+    const ratios = [1, 1.5, 2];
+    const voices = ratios.map((mult, i) => {
+      const o = ctx.createOscillator();
+      o.type = i === 0 ? "sine" : this.biome.wave;
+      o.frequency.value = this.biome.root * mult;
+      o.detune.value = (i - 1) * 4; // slight spread for warmth
+      const vg = ctx.createGain();
+      vg.gain.value = 0.5 / ratios.length;
+      o.connect(vg).connect(filter);
+      o.start();
+      return o;
+    });
+
+    // Slow breathing of the overall volume, layered on top of the level target.
+    const breath = ctx.createOscillator();
+    breath.frequency.value = 0.07;
+    const breathGain = ctx.createGain();
+    breathGain.gain.value = 0.005;
+    breath.connect(breathGain).connect(master.gain);
+    breath.start();
+
+    const t = ctx.currentTime;
+    filter.frequency.setValueAtTime(this.cutoff(), t);
+    master.gain.setValueAtTime(0.0001, t);
+    master.gain.linearRampToValueAtTime(this.level(), t + 3); // gentle fade-in
+
+    this.bed = { voices, breath, filter, master };
+    this.lastBright = this.bright;
+  }
+
+  private stopBed(): void {
+    const bed = this.bed;
+    const ctx = this.ctx;
+    this.bed = null;
+    this.lastBright = -1;
+    if (!bed || !ctx) return;
+    const t = ctx.currentTime;
+    bed.master.gain.cancelScheduledValues(t);
+    bed.master.gain.setValueAtTime(Math.max(0.0001, bed.master.gain.value), t);
+    bed.master.gain.linearRampToValueAtTime(0.0001, t + 1.2);
+    const stopAt = t + 1.3;
+    [...bed.voices, bed.breath].forEach((o) => {
+      try {
+        o.stop(stopAt);
+      } catch {
+        /* already stopped */
+      }
+    });
+  }
+
+  /** Retune the bed to a biome's root note and timbre; live if the bed is playing. */
+  setBiome(biome: string): void {
+    const b = BIOME_AMBIENCE[biome] ?? DEFAULT_AMBIENCE;
+    if (b === this.biome) return;
+    this.biome = b;
+    const bed = this.bed;
+    const ctx = this.ctx;
+    if (!bed || !ctx) return;
+    const ratios = [1, 1.5, 2];
+    bed.voices.forEach((o, i) => {
+      if (i > 0) o.type = b.wave;
+      o.frequency.linearRampToValueAtTime(b.root * ratios[i], ctx.currentTime + 2);
+    });
+  }
+
+  /**
+   * Track the day/night clock (t in 0..1, noon at 0.5): the bed brightens and
+   * swells toward noon and darkens and hushes at night. Throttled so the slow
+   * clock only retunes the bed every couple of seconds.
+   */
+  setTimeOfDay(t: number): void {
+    this.bright = 0.5 + 0.5 * Math.cos((t - 0.5) * Math.PI * 2);
+    const bed = this.bed;
+    const ctx = this.ctx;
+    if (!bed || !ctx) return;
+    if (Math.abs(this.bright - this.lastBright) < 0.02) return;
+    this.lastBright = this.bright;
+    const now = ctx.currentTime;
+    bed.filter.frequency.linearRampToValueAtTime(this.cutoff(), now + 1.2);
+    bed.master.gain.linearRampToValueAtTime(this.level(), now + 1.2);
+  }
+}
