@@ -57,6 +57,26 @@ export function dustBurstCount(cost: number): number {
   return Math.min(16, DUST_BURST_BASE + bonus);
 }
 
+/** Duration (ms) of a build's landing-thud camera kick — brief so the placement
+ *  punches without lingering. */
+export const BUILD_THUD_MS = 130;
+
+/** Baseline camera-shake intensity a building's landing thud kicks up. */
+export const BUILD_THUD_BASE = 0.0022;
+
+/**
+ * How hard the camera kicks when a building thuds into place. A heavier, pricier
+ * structure lands harder, so the jolt swells a touch per few resources of its
+ * cost — a hut thuds down with a firmer kick than a cheap campfire — exactly as
+ * its dust cloud ({@link dustBurstCount}) and spend float swell with the cost.
+ * Clamped well below the raid resolution's jolt (0.006) so a friendly placement
+ * never out-shakes an actual attack on the camp.
+ */
+export function buildThudShake(cost: number): number {
+  const bonus = Math.max(0, Math.floor(cost / 5)) * 0.0005;
+  return Math.min(0.005, BUILD_THUD_BASE + bonus);
+}
+
 /**
  * How many celebration particles a completed quest turn-in earns: the baseline
  * quest burst, swelled a little by the size of the payout so a fat reward pops
