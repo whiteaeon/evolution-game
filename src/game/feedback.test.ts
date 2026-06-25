@@ -12,6 +12,8 @@ import {
   questCelebrationCount,
   questRingScale,
   QUEST_RING_SCALE_BASE,
+  raidVictoryRingScale,
+  RAID_VICTORY_RING_SCALE_BASE,
   raidCelebrationCount,
   rallyBurstCount,
   studyFloatText,
@@ -60,6 +62,13 @@ describe("event feedback routing", () => {
     expect(questRingScale(12)).toBe(QUEST_RING_SCALE_BASE + 2); // floor(12/6) bonus
     expect(questRingScale(18)).toBeGreaterThan(questRingScale(6)); // a fatter payout blooms wider
     expect(questRingScale(1000)).toBeLessThanOrEqual(9); // never fills the screen
+  });
+
+  it("blooms the raid-victory ring wider with the band that held the line, but keeps it capped", () => {
+    expect(raidVictoryRingScale(1)).toBe(RAID_VICTORY_RING_SCALE_BASE); // chieftain alone → baseline bloom
+    expect(raidVictoryRingScale(3)).toBe(RAID_VICTORY_RING_SCALE_BASE + 2); // +1 step per rallied villager
+    expect(raidVictoryRingScale(5)).toBeGreaterThan(raidVictoryRingScale(2)); // a bigger band blooms wider
+    expect(raidVictoryRingScale(50)).toBeLessThanOrEqual(9); // never fills the screen
   });
 
   it("swells the raid-defence burst with the rallied band, but keeps it capped", () => {

@@ -37,7 +37,7 @@ import { footstepDust } from "./footstepDust.js";
 import { nightGlowAlpha } from "./nightGlow.js";
 import { isBlocked, removeSolid, type Solid } from "./solids.js";
 import { checkPlacement } from "./buildPlacement.js";
-import { acceptCelebrationCount, BURST_STYLE, buildSpendText, BUILD_THUD_MS, buildThudShake, dustBurstCount, gatherBurstCount, questCelebrationCount, questRingScale, raidCelebrationCount, raidPlunderText, rallyBurstCount, studyFloatText } from "./feedback.js";
+import { acceptCelebrationCount, BURST_STYLE, buildSpendText, BUILD_THUD_MS, buildThudShake, dustBurstCount, gatherBurstCount, questCelebrationCount, questRingScale, raidCelebrationCount, raidPlunderText, raidVictoryRingScale, rallyBurstCount, studyFloatText } from "./feedback.js";
 import {
   TUTORIAL_STEPS,
   advanceTutorial,
@@ -3216,6 +3216,12 @@ export class WorldScene extends Phaser.Scene {
       outcome.won ? 0x9fe070 : 0xff6a4a,
       raidCelebrationCount(outcome.won, defenders),
     );
+    // A driven-off raid earns the milestone ring, like the quest turn-in: a
+    // bright victory-green ring blooms at the hearth, swelling with the band that
+    // held the line. A breach gets no ring — there is nothing to celebrate.
+    if (outcome.won) {
+      this.burstRing(CAMP.x, CAMP.y - 6, 0x9fe070, raidVictoryRingScale(defenders));
+    }
     this.audio.raidResolve(outcome.won);
     this.flash(
       outcome.won

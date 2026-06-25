@@ -101,6 +101,24 @@ export function questRingScale(rewardAmount: number): number {
   return Math.min(9, QUEST_RING_SCALE_BASE + bonus);
 }
 
+/** Baseline max-scale the raid-victory's celebratory ring blooms to. */
+export const RAID_VICTORY_RING_SCALE_BASE = 5;
+
+/**
+ * How far a *won* raid defence's celebratory ring expands. Driving off a raid is
+ * the camp's other climactic payoff, so — like the quest turn-in — a bright ring
+ * blooms at the hearth, swelling a little with the size of the band that held the
+ * line (every villager rallied widens it), directly rewarding the rally effort.
+ * Clamped so even a huge muster never fills the screen. A breach earns no ring.
+ *
+ * @param defenders total defenders (the chieftain plus rallied villagers, so the
+ *                  bonus is one step of bloom per villager mustered).
+ */
+export function raidVictoryRingScale(defenders: number): number {
+  const bonus = Math.max(0, Math.floor(defenders) - 1);
+  return Math.min(9, RAID_VICTORY_RING_SCALE_BASE + bonus);
+}
+
 /**
  * How many particles a *quest accept* earns: a subdued sibling of the turn-in
  * burst. Accepting a task is a promise, not a payoff, so it pops smaller and is
