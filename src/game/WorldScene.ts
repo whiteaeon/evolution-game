@@ -14,6 +14,7 @@ import { chooseNpcActivity, type NpcActivity } from "./npcActivity.js";
 import { pickGatherTarget } from "./gatherTarget.js";
 import { stepGather } from "./gatherCadence.js";
 import { movePingStyle } from "./movePing.js";
+import { gatherPulseTint } from "./gatherPulse.js";
 import { depletionScale } from "./nodeDepletion.js";
 import { questMetric, type QuestMetrics, type QuestSpec } from "./quests.js";
 import { buildDialogue, type DialogNode } from "./dialogue.js";
@@ -133,6 +134,9 @@ const GATHER_RANGE = 34;
 const GATHER_STICK = 12; // a held node only yields to one closer by more than this
 /** Warm tint that marks the currently-aimed node so the player sees the target. */
 const GATHER_HILITE = 0xffd27a;
+/** Brighter peak the aim highlight breathes toward, and the cycle length (ms). */
+const GATHER_HILITE_PEAK = 0xfff0d0;
+const GATHER_HILITE_PULSE_MS = 900;
 
 /** One study session at the totem: spend this much food, gain this much insight. */
 const STUDY_FOOD = 5;
@@ -340,6 +344,7 @@ export class WorldScene extends Phaser.Scene {
   private gatherCooldown = 0;
   private activeParticles = 0; // live decorative dots, capped by MAX_PARTICLES
   private gatherTarget: Gatherable | null = null; // sticky aimed node, highlighted for the player
+  private gatherHiliteTime = 0; // ms into the aim highlight's breathing pulse; resets on re-aim
   // Diegetic audio: synthesized SFX + a biome/time-of-day ambient bed, silent
   // until a user gesture resumes it and behind the mute toggle (see ../ui/audio).
   private audio = new WorldAudio();
@@ -2492,8 +2497,16 @@ export class WorldScene extends Phaser.Scene {
     const node = idx >= 0 ? this.gatherables[idx] : null;
     if (node !== this.gatherTarget) {
       this.gatherTarget?.sprite.clearTint();
-      node?.sprite.setTint(GATHER_HILITE);
+      this.gatherHiliteTime = 0; // start the new target's pulse fresh at the base tint
       this.gatherTarget = node;
+    }
+    // Breathe the aimed node's highlight so it visibly throbs — clear amid a
+    // cluster of trees which one a Space press will actually harvest.
+    if (node) {
+      this.gatherHiliteTime += dt;
+      node.sprite.setTint(
+        gatherPulseTint(this.gatherHiliteTime, GATHER_HILITE_PULSE_MS, GATHER_HILITE, GATHER_HILITE_PEAK),
+      );
     }
     // Hold-to-gather: a held Space aimed at a node harvests at a steady cadence,
     // so the player can sustain a swing rhythm without tapping once per hit.
