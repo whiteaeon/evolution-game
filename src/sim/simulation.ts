@@ -3,7 +3,7 @@ import { clamp01, inherit, randomGenome } from "./genome.js";
 import { individualName } from "./naming.js";
 import { selectLeader, leaderBonus } from "./leadership.js";
 import { pickDialogueLine, type DialogueSituation } from "./dialogue.js";
-import { Knowledge, TECH_TREE, TECH_ORDER, eraCapstone } from "./knowledge.js";
+import { Knowledge, TECH_TREE, eraCapstone } from "./knowledge.js";
 import { Culture } from "./culture.js";
 import { Policies } from "./policies.js";
 import {
@@ -20,26 +20,28 @@ import {
   type QuestContext,
   type QuestProgress,
 } from "./quests.js";
+import { createRivals, type RivalTribe } from "./rivals.js";
+import { BALANCE, SHELTER_DEF, eraIndex } from "./balance.js";
+import type { SimEngine } from "./engine.js";
+import { updateWorld, seasonalConditions } from "./worldseason.js";
+import { produce, pickResearchTarget } from "./production.js";
+import { reproduce, carryingCapacity, fitnessWeights, pickByWeights } from "./reproduction.js";
 import {
-  createRivals,
-  evolveRival,
-  shiftRelations,
-  resolveSkirmish,
-  RAID_BALANCE,
-  RIVAL_BALANCE,
-  type RivalTribe,
-  type SkirmishSide,
-} from "./rivals.js";
+  maybeEvent,
+  maybeEncounter,
+  resolveEncounter as resolveEncounterImpl,
+  maybeEventChain,
+  maybeDiplomacy,
+  resolveChoice as resolveChoiceImpl,
+  accrueCulture,
+} from "./events.js";
+import { maybeRaid, evolveRivals } from "./raids.js";
 import {
   ERAS,
-  LINEAGES,
   SHELTERS,
   TASKS,
   TRAITS,
-  DIPLOMACY_EVENTS,
   type Biome,
-  type ChoiceOption,
-  type DiplomacyId,
   type Encounter,
   type Era,
   type EventChainId,
@@ -75,241 +77,6 @@ export const DEFAULT_CONFIG: SimConfig = {
   // opening cold up to roughly the old ice-age baseline.
   baseCold: 0.28,
 };
-
-/** Tunables grouped so the balance is in one readable place. */
-const BALANCE = {
-  consumptionPerCapita: 0.9,
-  cookedConsumptionFactor: 0.7,
-  gatherBase: 4.5,
-  huntBase: 4.5,
-  researchBase: 1.25,
-  researchCompression: 0.5, // sub-linear exponent on the aggregate research multiplier
-  researchCrowding: 0.82, // diminishing returns as the research team grows (coordination cost)
-  buildBase: 1.0,
-  // Carryable raw resources gathered per worker, scaled by per-biome availability
-  // (see BiomeProfile.wood/stone/hide). Builders cut wood + quarry stone; hunters
-  // take hide from the game they bring down.
-  woodPerBuilder: 0.7,
-  stonePerBuilder: 0.5,
-  hidePerHunter: 0.35,
-  coldLethality: 0.24,
-  // Seasonal swing: how hard winter bites and summer rewards. Both are amplitudes
-  // around the yearly mean (the mean cold/abundance is unchanged), so deepening
-  // them sharpens scarcity-vs-growth windows without shifting overall balance.
-  // Winter (season 0) is coldest + leanest; summer (season 0.5) warmest + richest.
-  seasonColdSwing: 0.24, // ± added to ambient cold across the year (was 0.18)
-  seasonAbundanceSwing: 0.28, // ± on the food multiplier, anti-phased with cold (was 0.2, sin-phased)
-  starveLethality: 0.18,
-  diseaseLethality: 0.2,
-  predatorLethality: 0.18,
-  raidLethality: 0.16,
-  chronicDisease: 0.022,
-  cookingIntelWeight: 2.0,
-  birthFoodCost: 3,
-  encounterInterval: 28, // ticks between possible neighbouring-group encounters
-  migrateFoodPerHead: 1.6, // food spent per person per unit distance travelled
-  migrateRisk: 0.5, // base per-person death chance over a full-map journey
-  foundFoodPerHead: 3, // provisions each migrant carries to a newly founded settlement
-  foodStoragePerCapacity: 9, // soft cap: max stored food = carryingCapacity * this (bounds hoarding)
-  // Scouting: idle hands sent out to chart the fogged regions of the world map.
-  scoutBase: 0.05, // exploration progress per idle scout per tick toward the next region
-  scoutCacheChance: 0.55, // chance a newly charted region yields a raw-resource cache (else a foraging find)
-  scoutCacheAmount: 14, // base raw-resource units in a scouting cache (scaled by the region's biome)
-  scoutEventFood: 12, // food a foraging party brings back when a charted region holds no cache
-  eventChainInterval: 37, // ticks between possible choice-driven event chains
-  // Diplomacy: periodic encounters with a rival that trade food for relations.
-  diplomacyInterval: 43, // ticks between possible diplomacy events
-  diploReciprocateCost: 6, // food sent back when reciprocating a gift
-  diploGiftKept: 10, // food gained by keeping a gift and giving nothing back
-  diploTributeCost: 8, // food paid to defuse a border tension
-  diploAidCost: 7, // food sent in answer to a request for aid
-  diploRelUp: 0.2, // relations gained by the generous response
-  diploRelDown: 0.2, // relations lost by the self-serving response
-  // Trade: a rival this friendly offers to trade your surplus food for goods or lore.
-  diploTradeMinRelations: 0.5, // relations at/above which a friendly rival proposes a trade
-  diploTradeFoodCost: 10, // surplus food given up in a trade
-  diploTradeMaterials: 12, // materials gained trading food for goods
-  diploTradeInsight: 30, // research points gained trading food for knowledge
-  diploTradeRelUp: 0.1, // relations warmed a little by a fair trade
-  // Belief track: culture accrues passively from each discovered culture-category
-  // tech (burial/art/republic…) and in chunks from ritual event chains.
-  culturePerCultureTech: 0.2, // culture per discovered culture-tech, per tick
-  cultureRitual: 14, // culture from resolving a ritual/belief event chain
-  // Epidemics: occasional, severe disease outbreaks layered on top of the endemic
-  // disease in mortalityProb. Severity scales with crowding (pop/capacity), the
-  // biome's diseaseMult and the era (denser settlements spread sickness faster),
-  // and is attenuated by medicine/sanitation/vaccines (diseaseDefense). All terms
-  // are bounded so an outbreak can hurt but never wipe a tribe out — survival is
-  // weighted hard toward diseaseResistance, so epidemics select for it.
-  epidemicInterval: 67, // ticks between possible epidemics (prime, distinct from eventInterval)
-  epidemicChance: 0.5, // chance an epidemic actually breaks out on an interval tick
-  epidemicMinPop: 6, // outbreaks never fire below this headcount (don't doom a recovering tribe)
-  epidemicBaseSeverity: 0.5, // base per-fully-susceptible death probability before scaling
-  epidemicDensityFloor: 0.4, // density term at zero crowding (a floor, so sparse tribes still risk a little)
-  epidemicDensityScale: 0.8, // extra density term at full crowding (pop == capacity)
-  epidemicEraScale: 0.06, // severity multiplier added per era index (Paleolithic 0 … Information 8)
-  epidemicMaxSeverity: 0.7, // hard ceiling on severity (bounds the worst outbreak; never a guaranteed wipe)
-  epidemicSelectionExponent: 1.6, // >1 makes survival skew harder toward diseaseResistance than endemic disease
-};
-
-interface ShelterDef {
-  warmth: number;
-  capacity: number; // additive carrying capacity
-  buildCost: number; // labor (buildProgress) required
-  cost: ResourceCost; // raw resources (wood/stone/hide) consumed on build
-  minEra: Era; // earliest era it can be built in
-}
-const SHELTER_DEF: Record<Shelter, ShelterDef> = {
-  cave: { warmth: 0.15, capacity: 0, buildCost: 0, cost: {}, minEra: "Paleolithic" },
-  hut: { warmth: 0.3, capacity: 6, buildCost: 35, cost: { wood: 16, stone: 4, hide: 4 }, minEra: "Paleolithic" },
-  village: { warmth: 0.38, capacity: 16, buildCost: 80, cost: { wood: 30, stone: 16, hide: 8 }, minEra: "Neolithic" },
-  town: { warmth: 0.45, capacity: 32, buildCost: 170, cost: { wood: 45, stone: 38, hide: 12 }, minEra: "Iron Age" },
-  city: { warmth: 0.5, capacity: 60, buildCost: 340, cost: { wood: 70, stone: 75, hide: 20 }, minEra: "Industrial" },
-};
-
-/** Trait leanings each neighbouring group contributes when you interbreed. */
-const ARCHETYPE: Record<Lineage, Partial<Genome>> = {
-  sapiens: { intelligence: 0.22, speech: 0.22, dexterity: 0.08 },
-  neanderthal: { strength: 0.24, coldTolerance: 0.2 },
-  denisovan: { diseaseResistance: 0.24, coldTolerance: 0.16 },
-};
-const LINEAGE_NAME: Record<Lineage, string> = {
-  sapiens: "a band of early Sapiens",
-  neanderthal: "a clan of Neanderthals",
-  denisovan: "a group of Denisovans",
-};
-
-/**
- * Presentation for each choice-driven event chain. The trade-off logic lives in
- * {@link Simulation.resolveChoice}; this is just the framing the UI shows. Option
- * 0 is always the cautious choice, option 1 the risky one.
- */
-const EVENT_CHAIN_DEF: Record<
-  EventChainId,
-  { title: string; message: string; options: [ChoiceOption, ChoiceOption] }
-> = {
-  hardWinter: {
-    title: "A hard winter",
-    message: "The cold bites deep and the stores run thin. How will the tribe endure?",
-    options: [
-      { label: "Ration the stores", hint: "spend food, no one is lost" },
-      { label: "Risk a winter hunt", hint: "more food, but the weak may not return" },
-    ],
-  },
-  sickCamp: {
-    title: "Sickness in the camp",
-    message: "A fever spreads through the band. Tend the afflicted or let it run its course?",
-    options: [
-      { label: "Tend the sick", hint: "spend food, the camp recovers" },
-      { label: "Let it run", hint: "costs nothing, but the frail may die" },
-    ],
-  },
-  rivalCache: {
-    title: "A rival's granary",
-    message: "Scouts find a neighbouring camp's food cache. Bargain for a share, or take it?",
-    options: [
-      { label: "Trade for a share", hint: "some food, no blood spilled" },
-      { label: "Raid the cache", hint: "much more food, but lives at risk" },
-    ],
-  },
-  prophet: {
-    title: "A seer's vision",
-    message: "A wandering seer speaks of signs in the sky. Make an offering, or follow the vision?",
-    options: [
-      { label: "Make an offering", hint: "spend food, the camp's spirits lift" },
-      { label: "Follow the vision", hint: "hard-won insight, but the trance can kill the unready" },
-    ],
-  },
-  migrationOmen: {
-    title: "A great migration",
-    message: "The herds are on the move and the omens point away. Let them pass, or follow?",
-    options: [
-      { label: "Let the herds pass", hint: "a lean season, but no one is lost" },
-      { label: "Follow the herds", hint: "much food, but the cold trek claims the frail" },
-    ],
-  },
-  feud: {
-    title: "A blood feud",
-    message: "Two families are at each other's throats. Broker a peace, or let them settle it?",
-    options: [
-      { label: "Broker a peace", hint: "spend food on a feast, no blood spilled" },
-      { label: "Let them settle it", hint: "costs nothing, but the quarrel may turn deadly" },
-    ],
-  },
-  bountifulFlood: {
-    title: "A bountiful flood",
-    message: "The river bursts its banks over the fertile plain. Move to high ground, or harvest the silt?",
-    options: [
-      { label: "Move to high ground", hint: "some stores spoil, but everyone is safe" },
-      { label: "Harvest the flooded plain", hint: "a great haul, but some are swept away" },
-    ],
-  },
-  stranger: {
-    title: "A stranger bearing knowledge",
-    message: "A lone traveller offers to share what they know. Listen at the fire, or take them in?",
-    options: [
-      { label: "Share a meal and listen", hint: "spend food for a little insight" },
-      { label: "Take the stranger in", hint: "deep insight, but they may carry fever" },
-    ],
-  },
-  sacredSite: {
-    title: "A sacred site",
-    message: "Scouts find a place that hums with old power. Honour it from afar, or claim its ground?",
-    options: [
-      { label: "Honour it from afar", hint: "leave offerings, the camp's spirits lift" },
-      { label: "Claim the sacred ground", hint: "rich materials, but the ground is guarded" },
-    ],
-  },
-};
-
-/**
- * Presentation for each diplomacy event. Like {@link EVENT_CHAIN_DEF}, the
- * trade-off logic lives in {@link Simulation.resolveChoice}; this is just the
- * framing. The message is templated with the rival's name. Option 0 is always the
- * generous response (spend food, warm relations), option 1 the self-serving one.
- */
-const DIPLOMACY_DEF: Record<
-  DiplomacyId,
-  { title: string; message: (name: string) => string; options: [ChoiceOption, ChoiceOption] }
-> = {
-  diploGift: {
-    title: "A neighbour's gift",
-    message: (n) => `A gift arrives at your camp from ${n}. Send one in return, or keep it and give nothing?`,
-    options: [
-      { label: "Send a gift in return", hint: "spend food, relations warm" },
-      { label: "Keep it, give nothing", hint: "gain food, but relations cool" },
-    ],
-  },
-  diploTension: {
-    title: "Tension at the border",
-    message: (n) => `Tension flares along the border with ${n}. Offer tribute, or stand firm?`,
-    options: [
-      { label: "Offer tribute", hint: "spend food, relations warm" },
-      { label: "Stand firm", hint: "spend nothing, but relations cool" },
-    ],
-  },
-  diploRequest: {
-    title: "A request for aid",
-    message: (n) => `Word comes from ${n}, asking aid through a hard season. Send aid, or refuse?`,
-    options: [
-      { label: "Send aid", hint: "spend food, relations warm" },
-      { label: "Refuse", hint: "keep your stores, but relations cool" },
-    ],
-  },
-  // Only offered by a friendly rival (see maybeDiplomacy); both branches are a
-  // mutually beneficial trade, so unusually neither cools relations.
-  diploTrade: {
-    title: "A trade caravan",
-    message: (n) => `${n} sends a trade caravan, offering goods or lore for your surplus food. What will you trade for?`,
-    options: [
-      { label: "Trade for knowledge", hint: "spend food, gain a research boost" },
-      { label: "Trade for materials", hint: "spend food, gain materials you lack" },
-    ],
-  },
-};
-
-const eraIndex = (e: Era) => ERAS.indexOf(e);
-const cap = (str: string) => str.charAt(0).toUpperCase() + str.slice(1);
 
 export interface SimState {
   tick: number;
@@ -416,6 +183,15 @@ export class Simulation {
     this.epidemicRng = new RNG((this.config.seed ^ 0xc2b2ae35) >>> 0);
     this.allocation = Object.fromEntries(TASKS.map((t) => [t, 0])) as TaskAllocation;
     this.state = this.createInitialState();
+  }
+
+  /**
+   * This instance narrowed to the surface the extracted concern modules touch
+   * (see {@link SimEngine}). Lets the production/reproduction/events/raids logic
+   * live in focused files without loosening the class's own `private` modifiers.
+   */
+  private get eng(): SimEngine {
+    return this as unknown as SimEngine;
   }
 
   // ── setup ────────────────────────────────────────────────────────────────
@@ -768,25 +544,25 @@ export class Simulation {
     s.culture.foldInto(effects); // belief cohesion, aggregated into the same bundle
     s.policies.foldInto(effects); // standing policy trade-offs, same bundle
     this.applyLeaderBonus(effects);
-    this.updateWorld(effects);
+    updateWorld(this.state, this.config, effects);
     this.distributeWorkers();
-    this.produce(effects);
-    this.accrueCulture();
+    produce(this.eng, effects);
+    accrueCulture(this.eng);
     this.advanceScouting();
     this.consumeAndUpdateNeeds(effects);
     const popBeforeDeaths = this.living.length;
     this.ageAndDie(effects);
-    this.maybeEvent(effects);
+    maybeEvent(this.eng, effects);
     this.maybeEpidemic(effects);
-    this.maybeRaid(effects);
+    maybeRaid(this.eng, effects);
     // A notable loss: several of the tribe fell in a single year — they grieve.
     if (popBeforeDeaths - this.living.length >= 2) this.emitDialogue("death");
-    this.maybeEncounter();
-    this.maybeEventChain();
-    this.maybeDiplomacy();
-    this.reproduce(effects);
+    maybeEncounter(this.eng);
+    maybeEventChain(this.eng);
+    maybeDiplomacy(this.eng);
+    reproduce(this.eng, effects);
     this.tryUpgradeShelter();
-    this.evolveRivals();
+    evolveRivals(this.state, this.rivalRng);
     // Refresh the leader after all of this tick's deaths are resolved, so the role
     // always points at a living adult (or null); the bonus above used the standing
     // leader and a succession (if any) is logged here.
@@ -814,37 +590,6 @@ export class Simulation {
     return BIOME_PROFILE[this.state.biome];
   }
 
-  private updateWorld(e: Required<TechEffects>): void {
-    const w = this.state.world;
-    const b = this.biome();
-    w.seasonIndex = this.state.tick % 4;
-    w.season = w.seasonIndex / 4;
-    const { cold, abundance } = this.seasonalConditions(b, w.season, e);
-    w.cold = cold;
-    w.abundance = abundance;
-  }
-
-  /**
-   * Seasonal cold + food multiplier for a biome at a given seasonal phase. The
-   * phase term is +1 at winter (season 0) and -1 at summer (season 0.5): cold
-   * rises with it, abundance falls against it, so winter is the joint coldest +
-   * leanest point and summer the warmest + richest. Swing magnitudes are BALANCE
-   * tunables and symmetric about the yearly mean, so deepening them never shifts
-   * the average — only the gap between scarcity and growth windows.
-   */
-  private seasonalConditions(
-    b: BiomeProfile,
-    season: number,
-    e: Required<TechEffects>,
-  ): { cold: number; abundance: number } {
-    const phase = Math.cos(season * Math.PI * 2);
-    const cold = clamp01(this.config.baseCold + b.coldAdd + phase * BALANCE.seasonColdSwing);
-    const abundance =
-      (0.9 - phase * BALANCE.seasonAbundanceSwing + e.abundance + (this.config.abundanceBonus ?? 0)) *
-      b.abundance;
-    return { cold, abundance };
-  }
-
   private workers: Record<Task, Individual[]> = {} as Record<Task, Individual[]>;
 
   private distributeWorkers(): void {
@@ -864,125 +609,6 @@ export class Simulation {
     }
     while (idx < pool.length) out.idle.push(pool[idx++]);
     this.workers = out;
-  }
-
-  private produce(e: Required<TechEffects>): void {
-    const s = this.state;
-    const k = s.knowledge;
-
-    const b = this.biome();
-    let food = 0;
-    let hide = 0;
-    for (const w of this.workers.gather) {
-      const techMult = k.has("gathering") ? 1 : 0.95;
-      food += BALANCE.gatherBase * (0.5 + w.genome.dexterity) * e.gatherMult * b.gatherMult * techMult * s.world.abundance;
-    }
-    for (const w of this.workers.hunt) {
-      const techMult = k.has("hunting") ? 1 : 0.6;
-      food += BALANCE.huntBase * (0.5 + w.genome.strength) * e.huntMult * b.huntMult * techMult * s.world.abundance;
-      // Hide is taken from the game that is hunted — biome-scaled, like the meat.
-      hide += BALANCE.hidePerHunter * (0.5 + w.genome.strength) * e.huntMult * b.hide;
-    }
-    food *= e.foodMult;
-    s.resources.food += food;
-    s.resources.hide += hide;
-
-    s.cookingActive = k.has("cooking") && this.workers.cook.length > 0 && s.resources.food > 0;
-
-    let build = 0;
-    let wood = 0;
-    let stone = 0;
-    for (const w of this.workers.build) {
-      const eff = 0.5 + w.genome.strength * 0.5 + w.genome.dexterity * 0.5;
-      build += BALANCE.buildBase * eff * e.buildMult;
-      // Builders also cut wood and quarry stone, by the biome's availability.
-      wood += BALANCE.woodPerBuilder * eff * e.buildMult * b.wood;
-      stone += BALANCE.stonePerBuilder * eff * e.buildMult * b.stone;
-    }
-    s.resources.buildProgress += build;
-    s.resources.materials += build * 0.2;
-    s.resources.wood += wood;
-    s.resources.stone += stone;
-
-    this.doResearch(e);
-  }
-
-  private doResearch(e: Required<TechEffects>): void {
-    const s = this.state;
-    if (
-      !s.researchTarget ||
-      s.knowledge.has(s.researchTarget) ||
-      !s.knowledge.isUnlocked(s.researchTarget)
-    ) {
-      s.researchTarget = this.pickResearchTarget();
-    }
-    if (!s.researchTarget) return;
-
-    // Cooperation grows with the language chain — teamwork multiplies ideas.
-    const cooperation = 1 + 0.06 * s.knowledge.languageLevel();
-    let perHead = 0;
-    for (const w of this.workers.research) {
-      const speechBonus = 1 + w.genome.speech * 0.5;
-      perHead += BALANCE.researchBase * (0.5 + w.genome.intelligence) * speechBonus;
-    }
-    // Diminishing returns as the team grows (coordination cost) keeps a huge
-    // late-game population from making research instantaneous.
-    const teamSize = Math.max(1, this.workers.research.length);
-    let points = (perHead / teamSize) * Math.pow(teamSize, BALANCE.researchCrowding);
-    // Compress the accumulated research multiplier: knowledge still accelerates
-    // progress, but sub-linearly, so the late eras stay visible rather than
-    // collapsing into a single tick once the multipliers compound.
-    points *= Math.pow(e.researchMult, BALANCE.researchCompression) * cooperation * (this.config.researchMult ?? 1);
-    if (points <= 0) return;
-
-    // Some techs are gated on a stock of raw resources (e.g. stone to smelt
-    // bronze): research can fill up to the cost but only completes once the bill
-    // is in hand, and the resources are spent when it does.
-    const req = TECH_TREE[s.researchTarget].resourceCost;
-    const ready = !req || this.hasResources(req);
-    const completed = s.knowledge.addProgress(s.researchTarget, points, ready);
-    if (completed) {
-      if (req) this.spendResources(req);
-      const def = TECH_TREE[completed];
-      const kind: SimEventType = def.unlocksEra ? "milestone" : "discovery";
-      this.logEvent(kind, def.unlocksEra ? `${def.name} — the ${def.unlocksEra} begins!` : `Discovered ${def.name}.`);
-      s.researchTarget = this.pickResearchTarget();
-    }
-  }
-
-  private pickResearchTarget(): TechId | null {
-    const avail = this.state.knowledge.available();
-    if (avail.length === 0) return null;
-    for (const t of TECH_ORDER) if (avail.includes(t)) return t;
-    return avail[0];
-  }
-
-  /**
-   * Accrue belief: every discovered culture-category tech (burial, art, …) feeds
-   * the track a little each tick. When the accrual crosses a stage threshold the
-   * tribe reaches a new belief stage — a belief-flavored milestone event. This is
-   * deterministic (no RNG draw), so it never perturbs any existing run or replay.
-   */
-  private accrueCulture(): void {
-    let rate = 0;
-    for (const id of this.state.knowledge.discovered) {
-      if (TECH_TREE[id].category === "culture") rate += BALANCE.culturePerCultureTech;
-    }
-    if (rate > 0) this.gainCulture(rate);
-  }
-
-  /**
-   * Add belief points, logging a belief-flavored milestone whenever the accrual
-   * crosses into a new stage — whatever the source (passive cultural techs or a
-   * ritual event chain). Deterministic; never touches the RNG stream.
-   */
-  private gainCulture(amount: number): void {
-    const s = this.state;
-    const before = s.culture.level();
-    s.culture.accrue(amount);
-    if (s.culture.level() > before) {
-      this.logEvent("milestone", `The tribe embraces ${s.culture.stage()!.name} — belief binds them closer.`);
-    }
   }
 
   /**
@@ -1112,50 +738,6 @@ export class Simulation {
     return clamp01(p);
   }
 
-  private maybeEvent(e: Required<TechEffects>): void {
-    const s = this.state;
-    if (s.tick % this.config.eventInterval !== 0) return;
-
-    const roll = this.rng.next();
-    const b = this.biome();
-    const settled = eraIndex(s.era) >= eraIndex("Bronze Age");
-    // Difficulty preset scales how deadly random events are; 1 = standard.
-    const lethal = this.config.eventLethality ?? 1;
-    if (roll < 0.35) {
-      this.applyHazard("diseaseResistance", BALANCE.diseaseLethality * lethal * b.diseaseMult * (1 - e.diseaseDefense) * (this.config.diseaseLethality ?? 1));
-      this.logEvent("disease", "A sickness sweeps the camp.");
-    } else if (roll < 0.62) {
-      // Predators in the wild; organised raids once settled.
-      if (settled) {
-        this.applyHazard("strength", BALANCE.raidLethality * lethal * e.defenseMult);
-        this.logEvent("raid", "Raiders strike at the settlement.");
-      } else {
-        this.applyHazard("strength", BALANCE.predatorLethality * lethal * b.predatorMult * e.defenseMult);
-        this.logEvent("predator", "Predators stalk the tribe.");
-      }
-    } else if (roll < 0.8) {
-      this.applyHazard("coldTolerance", BALANCE.coldLethality * lethal * 0.8);
-      this.logEvent("coldSnap", "A savage cold snap descends.");
-    } else {
-      s.resources.food += 12 * s.world.abundance;
-      this.logEvent("bounty", "A season of plenty — food is abundant.");
-    }
-  }
-
-  private applyHazard(trait: TraitName, lethality: number): number {
-    const s = this.state;
-    let deaths = 0;
-    for (const ind of this.living) {
-      if (this.rng.chance(clamp01((1 - ind.genome[trait]) * lethality))) {
-        ind.alive = false;
-        s.totals.deaths++;
-        this.invalidateLiving();
-        deaths++;
-      }
-    }
-    return deaths;
-  }
-
   /**
    * Bounded severity of an epidemic right now: the per-fully-susceptible death
    * probability before each individual's diseaseResistance is applied. Scales up
@@ -1231,202 +813,9 @@ export class Simulation {
     if (before - this.living.length >= 2) this.emitDialogue("death");
   }
 
-  /** The tribe's defensive rating for a skirmish: shelter tier + defensive tech. */
-  private defenseRating(e: Required<TechEffects>): number {
-    const shelterTier = SHELTERS.indexOf(this.state.shelter); // 0 (cave) … 4 (city)
-    // defenseMult is a lethality multiplier (<1 = better defended); invert to a
-    // non-negative bonus so hunting/bronze/iron/gunpowder raise the rating.
-    const techDefense = Math.max(0, 1 - e.defenseMult);
-    return 1 + shelterTier * RAID_BALANCE.defensePerShelterTier + techDefense;
-  }
-
-  /**
-   * A hostile rival raids the tribe. Fires only when a neighbour's relations have
-   * soured past {@link RAID_BALANCE.hostileRelations}; the timing is drawn on the
-   * rival RNG stream, so *whether* a raid happens never perturbs the player's own
-   * stream or replay. The skirmish is resolved deterministically by
-   * {@link resolveSkirmish}: both sides take losses scaled by strength, numbers,
-   * defensive tech and (for the tribe) shelter tier. Player casualties go through
-   * the existing mortality model ({@link applyHazard}); the raiders lose a matching
-   * share of their headcount, floored so a tribe is never wiped out.
-   */
-  private maybeRaid(e: Required<TechEffects>): void {
-    const s = this.state;
-    if (s.rivals.length === 0 || this.living.length < 2) return;
-    if (s.tick % RAID_BALANCE.raidInterval !== 0) return;
-    const hostiles = s.rivals.filter((r) => r.relations <= RAID_BALANCE.hostileRelations);
-    if (hostiles.length === 0) return;
-    if (!this.rivalRng.chance(0.5)) return;
-    const raider = this.rivalRng.pick(hostiles);
-
-    const defender: SkirmishSide = {
-      strength: this.traitAverages().traits.strength,
-      population: this.living.length,
-      defense: this.defenseRating(e),
-    };
-    const attacker: SkirmishSide = {
-      strength: raider.strength,
-      population: raider.population,
-      defense: 1 + raider.eraIndex * RAID_BALANCE.defensePerEra,
-    };
-    const outcome = resolveSkirmish(attacker, defender);
-
-    // Player losses through the existing per-individual mortality model.
-    const lost = this.applyHazard("strength", outcome.defenderLossFrac);
-    // Raiders lose a matching share of their headcount (floored so they persist).
-    raider.population = Math.max(
-      RIVAL_BALANCE.popFloor,
-      raider.population * (1 - outcome.attackerLossFrac),
-    );
-
-    this.logEvent(
-      "raid",
-      lost
-        ? `${raider.name} raid the settlement — ${lost} fell defending it.`
-        : `${raider.name} raid the settlement, but are driven off.`,
-    );
-  }
-
-  /**
-   * Interbreeding with other hominin groups. While the tribe is still archaic
-   * (Paleolithic/Neolithic), neighbouring bands occasionally appear; accepting
-   * the encounter injects their beneficial alleles into the gene pool — a real
-   * jump in trait averages plus fresh variance for selection to work on.
-   */
-  private maybeEncounter(): void {
-    const s = this.state;
-    if (s.pendingEncounter) {
-      if (s.tick > s.pendingEncounter.expiresTick) {
-        this.logEvent("encounter", `${cap(LINEAGE_NAME[s.pendingEncounter.lineage])} moved on.`);
-        s.pendingEncounter = null;
-      }
-      return;
-    }
-    const archaic = eraIndex(s.era) <= eraIndex("Neolithic");
-    if (!archaic || this.living.length < 6) return;
-    if (s.tick % BALANCE.encounterInterval !== 0) return;
-    if (!this.rng.chance(0.5)) return;
-
-    const lineage = this.rng.pick(LINEAGES);
-    s.pendingEncounter = {
-      lineage,
-      message: `You meet ${LINEAGE_NAME[lineage]}. Interbreed to share their strengths?`,
-      expiresTick: s.tick + 6,
-    };
-    this.logEvent("encounter", s.pendingEncounter.message);
-    this.emitDialogue("encounter");
-  }
-
   /** Resolve a pending encounter. Accepting injects new, archetype-leaning kin. */
   resolveEncounter(accept: boolean): void {
-    const s = this.state;
-    const enc = s.pendingEncounter;
-    if (!enc) return;
-    s.pendingEncounter = null;
-    if (!accept) {
-      this.logEvent("encounter", `The tribe kept to itself.`);
-      return;
-    }
-    const avg = this.traitAverages().traits;
-    const lean = ARCHETYPE[enc.lineage];
-    const newcomers = this.rng.int(2, 3);
-    for (let i = 0; i < newcomers; i++) {
-      const genome = {} as Genome;
-      for (const t of TRAITS) {
-        genome[t] = clamp01(avg[t] + (lean[t] ?? 0) + this.rng.gauss(0, 0.05));
-      }
-      const ind = this.makeIndividual(genome, s.generation, this.rng.int(16, 26));
-      ind.lineage = enc.lineage;
-      s.individuals.push(ind);
-      this.invalidateLiving();
-      s.totals.births++;
-    }
-    s.totals.interbred++;
-    if (!s.totals.lineagesInterbred.includes(enc.lineage)) s.totals.lineagesInterbred.push(enc.lineage);
-    this.logEvent("encounter", `Interbred with ${LINEAGE_NAME[enc.lineage]} — new blood strengthens the line.`);
-  }
-
-  /**
-   * Choice-driven event chains. Like {@link maybeEncounter}, these surface a
-   * pending decision with a trade-off that the player (or autopilot) resolves via
-   * {@link resolveChoice}; ignored, they expire. Only one decision is offered at a
-   * time so the UI never has to stack two modals.
-   */
-  private maybeEventChain(): void {
-    const s = this.state;
-    if (s.pendingChoice) {
-      if (s.tick > s.pendingChoice.expiresTick) {
-        this.logEvent("choice", `The moment to act passed — ${s.pendingChoice.title.toLowerCase()} went unanswered.`);
-        s.pendingChoice = null;
-      }
-      return;
-    }
-    if (s.pendingEncounter) return;
-    if (this.living.length < 4) return;
-    if (s.tick % BALANCE.eventChainInterval !== 0) return;
-    if (!this.rng.chance(0.5)) return;
-
-    const eligible = this.eligibleEventChains();
-    if (eligible.length === 0) return;
-    const id = this.rng.pick(eligible);
-    s.pendingChoice = { id, ...EVENT_CHAIN_DEF[id], expiresTick: s.tick + 6 };
-    if (!s.totals.eventChainsSeen.includes(id)) s.totals.eventChainsSeen.push(id);
-    this.logEvent("choice", s.pendingChoice.message);
-    this.emitDialogue("eventChain");
-  }
-
-  /** Which event chains the current world state can offer right now. */
-  private eligibleEventChains(): EventChainId[] {
-    const s = this.state;
-    const out: EventChainId[] = [];
-    if (s.world.cold > 0.5) out.push("hardWinter");
-    if (this.living.length >= 8) out.push("sickCamp");
-    if (eraIndex(s.era) >= eraIndex("Bronze Age")) out.push("rivalCache");
-    // Always-available chains: mysticism, herds and sacred ground need no setup.
-    out.push("prophet", "migrationOmen", "sacredSite");
-    if (this.living.length >= 10) out.push("feud");
-    // Floods matter to settled farmers; trade strangers travel established routes.
-    if (eraIndex(s.era) >= eraIndex("Neolithic")) out.push("bountifulFlood", "stranger");
-    return out;
-  }
-
-  /**
-   * Periodic diplomacy with a rival tribe. Mirrors {@link maybeEventChain} —
-   * surfaces a pending choice via the same mechanism — but it concerns a specific
-   * rival (`rivalId`) and its outcome shifts that rival's relations score. The
-   * trigger draws on the rival RNG stream, so deciding *when* a neighbour reaches
-   * out never perturbs the player's own simulation or replay.
-   */
-  private maybeDiplomacy(): void {
-    const s = this.state;
-    if (s.pendingChoice || s.pendingEncounter) return;
-    if (s.rivals.length === 0 || this.living.length < 4) return;
-    if (s.tick % BALANCE.diplomacyInterval !== 0) return;
-    if (!this.rivalRng.chance(0.5)) return;
-
-    const rival = this.rivalRng.pick(s.rivals);
-    // A trade caravan only comes from a rival the player has befriended; the other
-    // events can come from any neighbour.
-    const eligible = DIPLOMACY_EVENTS.filter(
-      (id) => id !== "diploTrade" || rival.relations >= BALANCE.diploTradeMinRelations,
-    );
-    const id = this.rivalRng.pick(eligible);
-    const def = DIPLOMACY_DEF[id];
-    s.pendingChoice = {
-      id,
-      title: def.title,
-      message: def.message(rival.name),
-      options: def.options,
-      expiresTick: s.tick + 6,
-      rivalId: rival.id,
-    };
-    this.logEvent("choice", s.pendingChoice.message);
-    this.emitDialogue("eventChain");
-  }
-
-  /** A rival by id, for resolving a diplomacy choice. */
-  private rivalById(id?: string): RivalTribe | undefined {
-    return id ? this.state.rivals.find((r) => r.id === id) : undefined;
+    resolveEncounterImpl(this.eng, accept);
   }
 
   /**
@@ -1434,236 +823,7 @@ export class Simulation {
    * option 1 the risky branch (a bigger payoff at the cost of lives).
    */
   resolveChoice(option: number): void {
-    const s = this.state;
-    const c = s.pendingChoice;
-    if (!c) return;
-    s.pendingChoice = null;
-    const risky = option === 1;
-    switch (c.id) {
-      case "hardWinter":
-        s.totals.winterChainsSurvived++;
-        if (risky) {
-          const gain = 18 * s.world.abundance;
-          s.resources.food += gain;
-          const lost = this.applyHazard("strength", BALANCE.predatorLethality);
-          this.logEvent("choice", `A winter hunt brings ${Math.round(gain)} food${lost ? ` — ${lost} did not return` : ""}.`);
-        } else {
-          s.resources.food = Math.max(0, s.resources.food - 8);
-          this.logEvent("choice", "The tribe rations its stores and waits out the cold.");
-        }
-        break;
-      case "sickCamp":
-        if (risky) {
-          const lost = this.applyHazard("diseaseResistance", BALANCE.diseaseLethality);
-          this.logEvent("choice", `The fever runs its course${lost ? ` — ${lost} did not recover` : ""}.`);
-        } else {
-          s.resources.food = Math.max(0, s.resources.food - 6);
-          for (const ind of this.living) ind.health = clamp01(ind.health + 0.15);
-          this.logEvent("choice", "The tribe tends its sick back to health.");
-        }
-        break;
-      case "rivalCache":
-        if (risky) {
-          const gain = 24 * s.world.abundance;
-          s.resources.food += gain;
-          const lost = this.applyHazard("strength", BALANCE.raidLethality);
-          this.logEvent("choice", `The tribe raids the cache for ${Math.round(gain)} food${lost ? ` — ${lost} fell in the fight` : ""}.`);
-        } else {
-          const gain = 8 * s.world.abundance;
-          s.resources.food += gain;
-          this.logEvent("choice", `The tribe trades for ${Math.round(gain)} food, keeping the peace.`);
-        }
-        break;
-      case "prophet":
-        this.gainCulture(BALANCE.cultureRitual); // a ritual deepens the tribe's belief
-        if (risky) {
-          this.grantInsight(40);
-          const lost = this.applyHazard("intelligence", BALANCE.diseaseLethality);
-          this.logEvent("choice", `Seekers walk the seer's vision and return with insight${lost ? ` — ${lost} did not wake from the trance` : ""}.`);
-        } else {
-          s.resources.food = Math.max(0, s.resources.food - 6);
-          for (const ind of this.living) ind.health = clamp01(ind.health + 0.12);
-          this.logEvent("choice", "Offerings are made; the camp's spirits lift.");
-        }
-        break;
-      case "migrationOmen":
-        if (risky) {
-          const gain = 20 * s.world.abundance;
-          s.resources.food += gain;
-          const lost = this.applyHazard("coldTolerance", BALANCE.coldLethality);
-          this.logEvent("choice", `The tribe follows the herds for ${Math.round(gain)} food${lost ? ` — ${lost} were lost to the cold trek` : ""}.`);
-        } else {
-          s.resources.food = Math.max(0, s.resources.food - 5);
-          this.logEvent("choice", "The herds pass on; the tribe weathers a lean season.");
-        }
-        break;
-      case "feud":
-        if (risky) {
-          const lost = this.applyHazard("strength", BALANCE.raidLethality);
-          this.logEvent("choice", `The families settle it themselves${lost ? ` — ${lost} fell to the feud` : ""}.`);
-        } else {
-          s.resources.food = Math.max(0, s.resources.food - 7);
-          for (const ind of this.living) ind.health = clamp01(ind.health + 0.1);
-          this.logEvent("choice", "A feast reconciles the families and the camp heals.");
-        }
-        break;
-      case "bountifulFlood":
-        if (risky) {
-          const gain = 24 * s.world.abundance;
-          s.resources.food += gain;
-          const lost = this.applyHazard("strength", BALANCE.predatorLethality);
-          this.logEvent("choice", `The flooded plain yields ${Math.round(gain)} food${lost ? ` — ${lost} were swept away` : ""}.`);
-        } else {
-          s.resources.food = Math.max(0, s.resources.food - 5);
-          this.logEvent("choice", "The tribe retreats to high ground; some stores spoil.");
-        }
-        break;
-      case "stranger":
-        if (risky) {
-          this.grantInsight(60);
-          const lost = this.applyHazard("diseaseResistance", BALANCE.diseaseLethality);
-          this.logEvent("choice", `The stranger teaches deeply${lost ? `, but the fever they carried took ${lost}` : ""}.`);
-        } else {
-          s.resources.food = Math.max(0, s.resources.food - 6);
-          this.grantInsight(25);
-          this.logEvent("choice", "The stranger shares a meal and a little of what they know.");
-        }
-        break;
-      case "sacredSite":
-        this.gainCulture(BALANCE.cultureRitual); // honouring the sacred ground deepens belief
-        if (risky) {
-          const gain = 8 * s.world.abundance;
-          s.resources.materials += 10;
-          s.resources.food += gain;
-          const lost = this.applyHazard("strength", BALANCE.predatorLethality);
-          this.logEvent("choice", `The tribe claims the sacred ground — rich materials${lost ? `, but ${lost} fell to its guardians` : ""}.`);
-        } else {
-          s.resources.food = Math.max(0, s.resources.food - 5);
-          for (const ind of this.living) ind.health = clamp01(ind.health + 0.1);
-          this.logEvent("choice", "Offerings are left at the sacred site; the camp's spirits lift.");
-        }
-        break;
-      case "diploGift": {
-        const rival = this.rivalById(c.rivalId);
-        const who = rival?.name ?? "the rival";
-        if (risky) {
-          s.resources.food += BALANCE.diploGiftKept;
-          if (rival) shiftRelations(rival, -BALANCE.diploRelDown);
-          this.logEvent("choice", `The tribe keeps ${who}'s gift and gives nothing back — relations cool.`);
-        } else {
-          s.resources.food = Math.max(0, s.resources.food - BALANCE.diploReciprocateCost);
-          if (rival) shiftRelations(rival, BALANCE.diploRelUp);
-          this.logEvent("choice", `A gift is sent in return to ${who} — relations warm.`);
-        }
-        break;
-      }
-      case "diploTension": {
-        const rival = this.rivalById(c.rivalId);
-        const who = rival?.name ?? "the rival";
-        if (risky) {
-          if (rival) shiftRelations(rival, -BALANCE.diploRelDown);
-          this.logEvent("choice", `The tribe stands firm against ${who} — relations cool.`);
-        } else {
-          s.resources.food = Math.max(0, s.resources.food - BALANCE.diploTributeCost);
-          if (rival) shiftRelations(rival, BALANCE.diploRelUp);
-          this.logEvent("choice", `Tribute is paid to ${who}, defusing the tension — relations warm.`);
-        }
-        break;
-      }
-      case "diploRequest": {
-        const rival = this.rivalById(c.rivalId);
-        const who = rival?.name ?? "the rival";
-        if (risky) {
-          if (rival) shiftRelations(rival, -BALANCE.diploRelDown);
-          this.logEvent("choice", `The tribe refuses ${who}'s plea — relations cool.`);
-        } else {
-          s.resources.food = Math.max(0, s.resources.food - BALANCE.diploAidCost);
-          if (rival) shiftRelations(rival, BALANCE.diploRelUp);
-          this.logEvent("choice", `Aid is sent to ${who} through the hard season — relations warm.`);
-        }
-        break;
-      }
-      case "diploTrade": {
-        const rival = this.rivalById(c.rivalId);
-        const who = rival?.name ?? "the rival";
-        // Both branches are a fair exchange of surplus food: pay food, warm
-        // relations, and take either a research boost or materials in return.
-        s.resources.food = Math.max(0, s.resources.food - BALANCE.diploTradeFoodCost);
-        if (rival) shiftRelations(rival, BALANCE.diploTradeRelUp);
-        if (risky) {
-          s.resources.materials += BALANCE.diploTradeMaterials;
-          this.logEvent("choice", `A fair trade with ${who} brings ${BALANCE.diploTradeMaterials} materials — relations warm.`);
-        } else {
-          this.grantInsight(BALANCE.diploTradeInsight);
-          this.logEvent("choice", `Lore traded with ${who} sharpens the tribe's craft — relations warm.`);
-        }
-        break;
-      }
-    }
-  }
-
-  /**
-   * Push research points onto the current target (cultural insight from an event).
-   * Mirrors the research loop's use of {@link Knowledge.addProgress} so a gift of
-   * insight can complete a tech just as ordinary research would.
-   */
-  private grantInsight(points: number): void {
-    const s = this.state;
-    const target = s.researchTarget ?? s.knowledge.available()[0] ?? null;
-    if (!target) return;
-    const req = TECH_TREE[target].resourceCost;
-    const ready = !req || this.hasResources(req);
-    const done = s.knowledge.addProgress(target, points, ready);
-    if (done) {
-      if (req) this.spendResources(req);
-      this.logEvent("discovery", `A flash of insight completes ${TECH_TREE[done].name}!`);
-    }
-  }
-
-  private reproduce(e: Required<TechEffects>): void {
-    const s = this.state;
-    const adults = this.living.filter(
-      (i) => i.age >= this.config.reproMinAge && i.age <= this.config.reproMaxAge && i.health > 0.3,
-    );
-    const females = adults.filter((i) => i.sex === "f");
-    const males = adults.filter((i) => i.sex === "m");
-    if (females.length === 0 || males.length === 0) return;
-
-    const capacity = this.carryingCapacity(e);
-    let pop = this.living.length;
-    const foodSecurity = clamp01(s.resources.food / (pop * 2 + 1));
-
-    // Fitness is constant across the loop (nothing it reads is mutated here), so
-    // compute each pool's weights once instead of re-scanning per birth — the
-    // old per-call map made selection O(females²) at large populations.
-    const b = this.biome();
-    const cold = s.world.cold;
-    const { weights: femaleWeights, total: femaleTotal } = this.fitnessWeights(females, e, b, cold, s.cookingActive);
-    const { weights: maleWeights, total: maleTotal } = this.fitnessWeights(males, e, b, cold, s.cookingActive);
-
-    for (let n = 0; n < females.length; n++) {
-      if (pop >= capacity) break;
-      if (s.resources.food < BALANCE.birthFoodCost) break;
-      const mother = this.pickByWeights(females, femaleWeights, femaleTotal, this.rng);
-      const pBirth = 0.85 * e.birthMult * mother.health * (0.45 + 0.55 * foodSecurity);
-      if (!this.rng.chance(pBirth)) continue;
-
-      const father = this.pickByWeights(males, maleWeights, maleTotal, this.rng);
-      const childGenome = inherit(mother.genome, father.genome, this.rng, this.config.mutationRate);
-      const child = this.makeIndividual(
-        childGenome,
-        Math.max(mother.generation, father.generation) + 1,
-        0,
-        mother.id,
-        father.id,
-      );
-      if (mother.lineage || father.lineage) child.lineage = mother.lineage ?? father.lineage;
-      s.individuals.push(child);
-      this.invalidateLiving();
-      s.resources.food -= BALANCE.birthFoodCost;
-      s.totals.births++;
-      pop++;
-    }
+    resolveChoiceImpl(this.eng, option);
   }
 
   carryingCapacity(
@@ -1671,64 +831,12 @@ export class Simulation {
     shelter: Shelter = this.state.shelter,
     b: BiomeProfile = this.biome(),
   ): number {
-    return (
-      this.config.carryingCapacityBase +
-      SHELTER_DEF[shelter].capacity +
-      b.capacity +
-      e.capacityBonus
-    );
+    return carryingCapacity(this.config, e, shelter, b);
   }
 
   /** Soft upper bound on stored food, scaled by the tribe's carrying capacity. */
   foodStorageCap(e: Required<TechEffects>): number {
     return this.carryingCapacity(e) * BALANCE.foodStoragePerCapacity;
-  }
-
-  private fitnessWeights(
-    pool: Individual[],
-    e: Required<TechEffects>,
-    b: BiomeProfile,
-    cold: number,
-    cookingActive: boolean,
-  ): { weights: number[]; total: number } {
-    // Standing social policy can sharpen (>1) or flatten (<1) individual selection
-    // by raising each fitness weight to a pressure exponent. The balanced default is
-    // 1, leaving the weights — and the run — exactly as before.
-    const pressure = this.state.policies.selectionPressure();
-    const weights = pool.map((m) => {
-      const f = this.fitness(m, e, b, cold, cookingActive);
-      return pressure === 1 ? f : Math.pow(f, pressure);
-    });
-    let total = 0;
-    for (const w of weights) total += w;
-    return { weights, total };
-  }
-
-  private pickByWeights(pool: Individual[], weights: number[], total: number, rng: RNG): Individual {
-    let r = rng.next() * total;
-    for (let i = 0; i < pool.length; i++) {
-      r -= weights[i];
-      if (r <= 0) return pool[i];
-    }
-    return pool[pool.length - 1];
-  }
-
-  private fitness(
-    ind: Individual,
-    e: Required<TechEffects>,
-    b: BiomeProfile,
-    cold: number,
-    cookingActive: boolean,
-  ): number {
-    let f = 0.2 + ind.health;
-    f += ind.genome.coldTolerance * cold;
-    f += ind.genome.strength * 0.3 + ind.genome.dexterity * 0.2;
-    // The biome rewards a particular trait — location shapes the lineage.
-    f += ind.genome[b.selectTrait] * b.selectWeight;
-    // Cooked food + schooling reward bigger brains.
-    const intelPressure = (cookingActive || ind.ateCooked ? BALANCE.cookingIntelWeight : 0) + e.intelPressure;
-    if (intelPressure > 0) f += ind.genome.intelligence * intelPressure;
-    return Math.max(0.01, f);
   }
 
   private tryUpgradeShelter(): void {
@@ -1767,15 +875,6 @@ export class Simulation {
     if (req.wood) r.wood -= req.wood;
     if (req.stone) r.stone -= req.stone;
     if (req.hide) r.hide -= req.hide;
-  }
-
-  /**
-   * Evolve the AI neighbour tribes one tick on their own RNG stream. Pure sim:
-   * they grow/decline, drift in strength and mood, and slowly climb their own
-   * tech ladder, independent of (and invisible to) the player's mechanics.
-   */
-  private evolveRivals(): void {
-    for (const r of this.state.rivals) evolveRival(r, this.rivalRng);
   }
 
   private updateEraAndGeneration(): void {
@@ -1874,7 +973,7 @@ export class Simulation {
     const b = BIOME_PROFILE[st.biome];
     // Local biome conditions: same season as home, but this settlement's biome —
     // shares updateWorld's seasonal formula so cold/abundance pressures are truly local.
-    const { cold, abundance } = this.seasonalConditions(b, s.world.season, e);
+    const { cold, abundance } = seasonalConditions(this.config, b, s.world.season, e);
 
     const alive = st.members.filter((m) => m.alive);
     const workers = this.distributeForSettlement(alive, st.allocation);
@@ -1987,7 +1086,7 @@ export class Simulation {
       s.knowledge.has(s.researchTarget) ||
       !s.knowledge.isUnlocked(s.researchTarget)
     ) {
-      s.researchTarget = this.pickResearchTarget();
+      s.researchTarget = pickResearchTarget(s);
     }
     if (!s.researchTarget) return;
     const cooperation = 1 + 0.06 * s.knowledge.languageLevel();
@@ -2008,7 +1107,7 @@ export class Simulation {
       const def = TECH_TREE[completed];
       const kind: SimEventType = def.unlocksEra ? "milestone" : "discovery";
       this.logEvent(kind, def.unlocksEra ? `${def.name} — the ${def.unlocksEra} begins!` : `Discovered ${def.name}.`);
-      s.researchTarget = this.pickResearchTarget();
+      s.researchTarget = pickResearchTarget(s);
     }
   }
 
@@ -2032,16 +1131,16 @@ export class Simulation {
     const capacity = this.carryingCapacity(e, st.shelter, b);
     let pop = alive.length;
     const foodSecurity = clamp01(st.resources.food / (pop * 2 + 1));
-    const { weights: fw, total: ft } = this.fitnessWeights(females, e, b, cold, cookingActive);
-    const { weights: mw, total: mt } = this.fitnessWeights(males, e, b, cold, cookingActive);
+    const { weights: fw, total: ft } = fitnessWeights(s.policies, females, e, b, cold, cookingActive);
+    const { weights: mw, total: mt } = fitnessWeights(s.policies, males, e, b, cold, cookingActive);
 
     for (let n = 0; n < females.length; n++) {
       if (pop >= capacity) break;
       if (st.resources.food < BALANCE.birthFoodCost) break;
-      const mother = this.pickByWeights(females, fw, ft, this.settlementRng);
+      const mother = pickByWeights(females, fw, ft, this.settlementRng);
       const pBirth = 0.85 * e.birthMult * mother.health * (0.45 + 0.55 * foodSecurity);
       if (!this.settlementRng.chance(pBirth)) continue;
-      const father = this.pickByWeights(males, mw, mt, this.settlementRng);
+      const father = pickByWeights(males, mw, mt, this.settlementRng);
       const childGenome = inherit(mother.genome, father.genome, this.settlementRng, this.config.mutationRate);
       const child = this.makeIndividual(
         childGenome,
