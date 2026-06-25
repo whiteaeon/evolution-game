@@ -7,6 +7,7 @@ import {
   GATHER_BURST_BASE,
   questCelebrationCount,
   raidCelebrationCount,
+  rallyBurstCount,
   type FeedbackKind,
 } from "./feedback.js";
 
@@ -69,6 +70,16 @@ describe("event feedback routing", () => {
     expect(gatherBurstCount(5)).toBeGreaterThan(gatherBurstCount(2)); // a fatter swing pops fatter
     expect(gatherBurstCount(100)).toBeLessThanOrEqual(12); // never floods the scene
     expect(gatherBurstCount(0)).toBe(GATHER_BURST_BASE); // never dips below the baseline
+  });
+
+  it("swells the rally muster pop as the band grows, but keeps it subdued and capped", () => {
+    const first = rallyBurstCount(1); // the first villager mustered → baseline
+    expect(first).toBe(5);
+    expect(rallyBurstCount(2)).toBe(first + 1); // each extra defender adds one particle
+    expect(rallyBurstCount(4)).toBeGreaterThan(rallyBurstCount(2)); // a bigger band pops bigger
+    expect(rallyBurstCount(50)).toBeLessThanOrEqual(10); // never floods the scene
+    // A single muster stays subtler than a whole defence resolving.
+    expect(rallyBurstCount(50)).toBeLessThan(raidCelebrationCount(true, 50));
   });
 
   it("makes a breach a small, subdued puff regardless of band size", () => {

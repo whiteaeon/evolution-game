@@ -21,7 +21,7 @@ import { buildRaidSides, resolveRaid } from "./raidDefense.js";
 import { outbreakRisk } from "./epidemicRisk.js";
 import { isPointVisible } from "./cull.js";
 import { particleBudget } from "./particleBudget.js";
-import { acceptCelebrationCount, BURST_STYLE, gatherBurstCount, questCelebrationCount, raidCelebrationCount } from "./feedback.js";
+import { acceptCelebrationCount, BURST_STYLE, gatherBurstCount, questCelebrationCount, raidCelebrationCount, rallyBurstCount } from "./feedback.js";
 import {
   TUTORIAL_STEPS,
   advanceTutorial,
@@ -2757,6 +2757,9 @@ export class WorldScene extends Phaser.Scene {
     next.ty = Phaser.Math.Clamp(CAMP.y + 30 + Math.sin(a) * 28, 50, WORLD_H - 20);
     next.workT = 0;
     this.floatGain(next.sprite.x, next.sprite.y - 18, "to arms!", "#ffd2c2");
+    // A warm muster pop at the villager, swelling as the band grows — a rally
+    // builds visible momentum at the hearth, like every other interactive action.
+    this.popParticles(next.sprite.x, next.sprite.y - 12, 0xffd27a, rallyBurstCount(this.rallied.size));
     this.audio.build(true);
   }
 

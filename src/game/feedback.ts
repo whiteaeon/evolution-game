@@ -80,6 +80,22 @@ export function raidCelebrationCount(won: boolean, defenders: number): number {
 }
 
 /**
+ * How many particles one *rally* muster pops at the villager falling in to
+ * defend. Each press musters a single villager, but the pop swells as the band
+ * grows — every defender already standing adds a particle — so a hard-pressed
+ * rally builds visible momentum at the hearth, directly rewarding mustering the
+ * whole band before the raiders arrive. It stays subdued (smaller and lower-
+ * capped than the raid resolution) since it fires once per villager, often in
+ * quick succession during the defend window.
+ *
+ * @param rallied total villagers now defending (including the one just mustered,
+ *                so the first rally pops the baseline and each adds one).
+ */
+export function rallyBurstCount(rallied: number): number {
+  return Math.min(10, 5 + Math.max(0, Math.floor(rallied) - 1));
+}
+
+/**
  * Route a logged sim event to the burst it deserves, or null when it earns no
  * extra juice. Births and deaths are not log events — the scene derives those
  * from the `totals` counters — so they are not handled here.
