@@ -13,6 +13,7 @@ import { HOMININ_WALK, homininFrameKey } from "./homininWalk.js";
 import { chooseNpcActivity, type NpcActivity } from "./npcActivity.js";
 import { questMetric, type QuestMetrics, type QuestSpec } from "./quests.js";
 import { buildDialogue, type DialogNode } from "./dialogue.js";
+import { buildRaidSides, resolveRaid } from "./raidDefense.js";
 import {
   TUTORIAL_STEPS,
   advanceTutorial,
@@ -113,6 +114,12 @@ const GIFT_FOOD = 6; // mirrors the sim's diploReciprocateCost
 const GIFT_RELATIONS = 0.2; // relations warmed per gift (mirrors the sim's diploRelUp)
 const GIFT_RANGE = 56; // how close to the neighbour camp you must stand
 const GIFT_COOLDOWN_MS = 600; // a brief pause between gifts
+
+const RAID_FIRST_MS = 45000; // first raid only after the player has settled in
+const RAID_REPEAT_MS = 120000; // quiet stretch between raids
+const RAID_WARN_MS = 12000; // sighting → raiders reach the camp (the defend window)
+const RALLY_RANGE = 110; // how close to camp the chieftain must stand to rally
+const RAID_PLUNDER_FOOD = 20; // most food raiders carry off (scaled by how badly it goes)
 /** Particle tint per resource — woody brown, leafy green, cool grey stone. */
 const RES_COLOR: Record<ResKind, number> = { wood: 0xb5793b, food: 0x6fcf57, stone: 0xc2c6cf };
 /** Floating-gain text colour per resource (a brighter sibling of the particle). */
@@ -290,6 +297,19 @@ export class WorldScene extends Phaser.Scene {
   private giftCooldown = 0;
   private giftPrompt!: Phaser.GameObjects.Text;
 
+  // Interactive camp defence: a hostile party marches on the camp; the chieftain
+  // rallies villagers during a short window, then the raid resolves on the sim's
+  // own skirmish math (see ./raidDefense).
+  private defendKey!: Phaser.Input.Keyboard.Key;
+  private raidTimer = RAID_FIRST_MS; // counts down to the next sighting
+  private raidActive = false;
+  private raidCountdown = 0; // ms until the raiders reach the camp
+  private raidParty: Phaser.GameObjects.Image | null = null;
+  private raidStart: { x: number; y: number } | null = null;
+  private rallied = new Set<number>(); // villagers mustered to the camp this raid
+  private raidBanner!: Phaser.GameObjects.Text; // top-screen threat indicator
+  private raidPrompt!: Phaser.GameObjects.Text; // "F: rally" near the camp
+
   constructor() {
     super("world");
   }
@@ -349,6 +369,7 @@ export class WorldScene extends Phaser.Scene {
     this.gatherKey = this.key("SPACE");
     this.ritualKey = this.key("R");
     this.giftKey = this.key("G");
+    this.defendKey = this.key("F");
 
     // One handler does both jobs: a click on a tribe member talks; a click on the
     // ground walks there. `currentlyOver` is every interactive object under the
@@ -689,8 +710,35 @@ export class WorldScene extends Phaser.Scene {
       .setDepth(UI_DEPTH)
       .setVisible(false);
 
+    this.raidBanner = this.add
+      .text(VIEW_W / 2, 46, "", {
+        fontFamily: "monospace",
+        fontSize: "12px",
+        color: "#ffd2c2",
+        backgroundColor: "#5a1410cc",
+        padding: { x: 8, y: 4 },
+        align: "center",
+      })
+      .setOrigin(0.5, 0)
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH + 4)
+      .setVisible(false);
+
+    this.raidPrompt = this.add
+      .text(0, 0, "", {
+        fontFamily: "monospace",
+        fontSize: "11px",
+        color: "#ffd2c2",
+        backgroundColor: "#000000aa",
+        padding: { x: 4, y: 2 },
+      })
+      .setOrigin(0.5, 1)
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH)
+      .setVisible(false);
+
     this.add
-      .text(VIEW_W / 2, 28, "WASD/click move · click a villager · Space gather · R ritual · G gift · build bar · L quests · T research", {
+      .text(VIEW_W / 2, 28, "WASD/click move · click a villager · Space gather · R ritual · G gift · F rally · build bar · L quests · T research", {
         fontFamily: "monospace",
         fontSize: "10px",
         color: "#cfe0d0",
@@ -1153,6 +1201,7 @@ export class WorldScene extends Phaser.Scene {
     this.updateGather(dt);
     this.updateRitual(dt);
     this.updateDiplomacy(dt);
+    this.updateRaid(dt);
     this.updateQuests();
     this.updateInspectMarks();
     this.revealFog();
@@ -1873,6 +1922,166 @@ export class WorldScene extends Phaser.Scene {
     this.popParticles(camp.x, camp.y - 12, 0x9fe070);
     this.buildSfx(true);
     this.updateRivalLabel();
+  }
+
+  // ── interactive camp defence ─────────────────────────────────────────────────
+
+  /**
+   * Drive the raid event each frame. While idle, count down to the next sighting;
+   * once a hostile party is marching, advance it toward the camp, let the chieftain
+   * rally villagers during the window, and resolve the skirmish when it arrives.
+   */
+  private updateRaid(dt: number): void {
+    if (!this.rival || !this.rivalCamp) return; // no neighbour surfaced → no raids
+
+    if (!this.raidActive) {
+      // Don't open a raid over a blocking panel/dialog; just hold the timer.
+      if (this.dialogOpen || this.techPanelOpen || this.inspectOpen) return;
+      this.raidTimer -= dt;
+      if (this.raidTimer <= 0) this.startRaid();
+      return;
+    }
+
+    // Active: march the party from its camp toward our hearth over the window.
+    this.raidCountdown -= dt;
+    const t = 1 - Math.max(0, this.raidCountdown) / RAID_WARN_MS;
+    const party = this.raidParty;
+    const start = this.raidStart;
+    if (party && start) {
+      party.x = Phaser.Math.Linear(start.x, CAMP.x, t);
+      party.y = Phaser.Math.Linear(start.y, CAMP.y + 36, t);
+      party.setDepth(party.y);
+    }
+
+    const secs = Math.max(0, Math.ceil(this.raidCountdown / 1000));
+    this.raidBanner.setText(
+      `⚔ ${this.rival.name} raid the camp — ${secs}s\nrallied ${this.rallied.size}  ·  hold the hearth, press F`,
+    );
+
+    // Rally: each press musters the nearest un-rallied villager to the hearth.
+    const nearCamp =
+      Phaser.Math.Distance.Between(this.player.x, this.player.y, CAMP.x, CAMP.y) < RALLY_RANGE;
+    const cam = this.cameras.main;
+    this.raidPrompt
+      .setText(nearCamp ? "F: rally a villager to defend" : "Return to the hearth to rally!")
+      .setAlpha(nearCamp ? 1 : 0.6)
+      .setPosition(CAMP.x - cam.scrollX, CAMP.y - cam.scrollY - 56)
+      .setVisible(true);
+    if (nearCamp && Phaser.Input.Keyboard.JustDown(this.defendKey)) this.rallyVillager();
+
+    if (this.raidCountdown <= 0) this.resolveRaidEvent();
+  }
+
+  /** Sight a hostile party at the neighbour camp and start the defend window. */
+  private startRaid(): void {
+    const rival = this.rival;
+    const camp = this.rivalCamp;
+    if (!rival || !camp) return;
+    this.raidActive = true;
+    this.raidCountdown = RAID_WARN_MS;
+    this.rallied.clear();
+    this.raidStart = { x: camp.x, y: camp.y };
+    const key = ensureHomininTexture(this, {
+      eraIdx: rival.eraIndex,
+      modernity: 0.4,
+      bulk: 0.85,
+      fur: 0.6,
+      skin: 2,
+      hair: 1,
+    });
+    this.raidParty = this.add
+      .image(camp.x, camp.y, key)
+      .setOrigin(0.5, 1)
+      .setScale(1.3)
+      .setTint(0xff8a7a)
+      .setDepth(camp.y);
+    this.raidBanner.setVisible(true);
+    this.flash(`${rival.name} are raiding! Rally at the hearth (F)`);
+    this.buildSfx(false);
+  }
+
+  /** Muster the nearest villager not yet defending to fall back to the hearth. */
+  private rallyVillager(): void {
+    let next: Npc | null = null;
+    let bestD = Infinity;
+    for (const n of this.npcs) {
+      if (this.rallied.has(n.ind.id)) continue;
+      const d = Phaser.Math.Distance.Between(n.sprite.x, n.sprite.y, CAMP.x, CAMP.y);
+      if (d < bestD) {
+        bestD = d;
+        next = n;
+      }
+    }
+    if (!next) {
+      this.flash("The whole band is already defending!");
+      return;
+    }
+    this.rallied.add(next.ind.id);
+    // Send them to a ring around the hearth; updateNpcs walks them there.
+    const a = Math.random() * Math.PI * 2;
+    next.activity = "wander";
+    next.tx = Phaser.Math.Clamp(CAMP.x + Math.cos(a) * 40, 30, WORLD_W - 30);
+    next.ty = Phaser.Math.Clamp(CAMP.y + 30 + Math.sin(a) * 28, 50, WORLD_H - 20);
+    next.workT = 0;
+    this.floatGain(next.sprite.x, next.sprite.y - 18, "to arms!", "#ffd2c2");
+    this.buildSfx(true);
+  }
+
+  /**
+   * The raiders arrive: resolve on the sim's own skirmish math (chieftain + rallied
+   * band vs the rival, shielded by shelter tier and defensive tech) and apply the
+   * fallout — the raiders take their losses, food is plundered on a poor defence.
+   */
+  private resolveRaidEvent(): void {
+    const sim = this.ctrl.sim;
+    const rival = this.rival;
+    if (!rival) return;
+    const defenders = 1 + this.rallied.size; // the chieftain always stands
+    const sides = buildRaidSides(
+      sim.state,
+      sim.state.knowledge.aggregateEffects(),
+      rival,
+      defenders,
+      sim.traitAverages().traits.strength,
+    );
+    const outcome = resolveRaid(sides, RAID_PLUNDER_FOOD);
+
+    rival.population = outcome.raiderSurvivors; // raiders take their losses
+    if (outcome.plunder > 0) {
+      sim.state.resources.food = Math.max(0, sim.state.resources.food - outcome.plunder);
+    }
+
+    this.cameras.main.shake(260, 0.006);
+    this.popParticles(CAMP.x, CAMP.y - 6, outcome.won ? 0x9fe070 : 0xff6a4a);
+    this.buildSfx(outcome.won);
+    this.flash(
+      outcome.won
+        ? `${rival.name} are driven off! The camp holds.`
+        : `${rival.name} broke through — ${outcome.plunder} food plundered.`,
+    );
+    this.endRaid();
+  }
+
+  /** Tear down the raid: retreat the party and arm the next quiet stretch. */
+  private endRaid(): void {
+    this.raidActive = false;
+    this.raidCountdown = 0;
+    this.raidTimer = RAID_REPEAT_MS;
+    this.rallied.clear();
+    this.raidStart = null;
+    const party = this.raidParty;
+    if (party) {
+      this.raidParty = null;
+      this.tweens.add({
+        targets: party,
+        alpha: 0,
+        y: party.y - 14,
+        duration: 420,
+        onComplete: () => party.destroy(),
+      });
+    }
+    this.raidBanner.setVisible(false);
+    this.raidPrompt.setVisible(false);
   }
 
   /** A small radial burst of fading dots at a world point — the gather "pop". */
