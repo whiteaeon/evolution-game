@@ -13,6 +13,7 @@ import { HOMININ_WALK, homininFrameKey } from "./homininWalk.js";
 import { chooseNpcActivity, type NpcActivity } from "./npcActivity.js";
 import { pickGatherTarget } from "./gatherTarget.js";
 import { stepGather } from "./gatherCadence.js";
+import { movePingStyle } from "./movePing.js";
 import { depletionScale } from "./nodeDepletion.js";
 import { questMetric, type QuestMetrics, type QuestSpec } from "./quests.js";
 import { buildDialogue, type DialogNode } from "./dialogue.js";
@@ -70,6 +71,8 @@ const PLAYER_SCALE = 1.15;
 // eases the lead in/out so reversing course doesn't whip the view.
 const CAMERA_LEAD = 64;
 const CAMERA_LEAD_LERP = 4;
+const MOVE_PING_MS = 420; // lifetime of the click-to-move destination ripple
+const MOVE_PING_R = 14; // base radius of the ping ring, scaled by movePingStyle
 const FOG_CELL = 64;
 const FOG_DEPTH = 5000;
 
@@ -248,6 +251,8 @@ export class WorldScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Image;
   private playerKey = "";
   private moveTarget: { x: number; y: number } | null = null;
+  private moveMark!: Phaser.GameObjects.Arc; // expanding ring pinged at a click-to-move destination
+  private moveMarkAge = 0; // ms since the current ping fired; drives its expand-and-fade
   private keys!: Record<"up" | "down" | "left" | "right", Phaser.Input.Keyboard.Key[]>;
   private animTimer = 0;
   private animPhase = 0;
@@ -479,6 +484,14 @@ export class WorldScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(FOG_DEPTH - 1)
       .setVisible(false);
+    // A brief ripple pinged at a click-to-move destination, so a walk order has
+    // a clear "go here" confirmation. Stroke-only ring; expand-and-fade driven
+    // by movePingStyle. Sits just under the fog so it reads as a ground mark.
+    this.moveMark = this.add
+      .circle(0, 0, MOVE_PING_R)
+      .setStrokeStyle(2.5, 0xfff2c8, 0.95)
+      .setDepth(FOG_DEPTH - 3)
+      .setVisible(false);
 
     this.keys = {
       up: [this.key("W"), this.key("UP")],
@@ -576,6 +589,7 @@ export class WorldScene extends Phaser.Scene {
           return;
         }
         this.moveTarget = { x: pointer.worldX, y: pointer.worldY };
+        this.pingMove(pointer.worldX, pointer.worldY);
       },
     );
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => this.updateGhost(p));
@@ -1666,6 +1680,7 @@ export class WorldScene extends Phaser.Scene {
   override update(_t: number, dt: number): void {
     this.ctrl.update(dt); // keeps the world model alive (no-op while paused)
     this.movePlayer(dt);
+    this.updateMovePing(dt);
     this.updateBuildAim();
     this.updateNpcs(dt);
     this.updateGather(dt);
@@ -2961,6 +2976,24 @@ export class WorldScene extends Phaser.Scene {
     this.leadX += (tLeadX - this.leadX) * leadRamp;
     this.leadY += (tLeadY - this.leadY) * leadRamp;
     this.cameras.main.setFollowOffset(-this.leadX, -this.leadY);
+  }
+
+  /** Fire the click-to-move ripple at a destination, restarting any live one. */
+  private pingMove(wx: number, wy: number): void {
+    this.moveMarkAge = 0;
+    this.moveMark.setPosition(wx, wy).setVisible(true);
+  }
+
+  /** Expand-and-fade the destination ping over its lifetime, then hide it. */
+  private updateMovePing(dt: number): void {
+    if (!this.moveMark.visible) return;
+    this.moveMarkAge += dt;
+    const s = movePingStyle(this.moveMarkAge, MOVE_PING_MS);
+    if (s.done) {
+      this.moveMark.setVisible(false);
+      return;
+    }
+    this.moveMark.setScale(s.scale).setAlpha(s.alpha);
   }
 
   private revealFog(): void {
