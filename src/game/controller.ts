@@ -1,4 +1,11 @@
-import { Simulation, DIFFICULTY_PRESETS, type Difficulty, type Task } from "../sim/index.js";
+import {
+  Simulation,
+  DIFFICULTY_PRESETS,
+  SCENARIO_PRESETS,
+  type Difficulty,
+  type Scenario,
+  type Task,
+} from "../sim/index.js";
 import { foldLegacy, loadLegacy, saveLegacy, type Legacy } from "./legacy.js";
 import { loadAchievements, mergeUnlocked, saveAchievements, type AchievementId } from "./achievements.js";
 
@@ -17,6 +24,8 @@ export class GameController {
   legacy: Legacy;
   /** Difficulty preset applied to the next run started. */
   difficulty: Difficulty = "standard";
+  /** Start scenario applied to the next run started. */
+  scenario: Scenario = "valley";
   /** Achievements unlocked across all runs (persisted, sticky). */
   unlocked: AchievementId[];
   /** Set once a run has ended (won/extinct) and been folded into the legacy. */
@@ -34,10 +43,12 @@ export class GameController {
   private startRun(seed = (Math.random() * 1e9) | 0): void {
     this.sim = new Simulation({
       seed,
-      baseCold: 0.45,
-      carryingCapacityBase: 16,
       founderBonus: this.legacy.bonus,
       ...DIFFICULTY_PRESETS[this.difficulty].config,
+      // The scenario fixes the start (region, pop, stores, cold, capacity); it is
+      // spread last so those knobs win over the difficulty preset, which keeps
+      // owning the orthogonal lethality/abundance dials.
+      ...SCENARIO_PRESETS[this.scenario].config,
     });
     this.sim.setAllocation("gather", 4);
     this.sim.setAllocation("hunt", 2);
@@ -74,6 +85,10 @@ export class GameController {
   /** Choose the difficulty preset; applies to the next run started. */
   setDifficulty(d: Difficulty): void {
     this.difficulty = d;
+  }
+  /** Choose the start scenario; applies to the next run started. */
+  setScenario(s: Scenario): void {
+    this.scenario = s;
   }
   adjustTask(task: Task, delta: number): void {
     this.sim.setAllocation(task, this.sim.allocation[task] + delta);
