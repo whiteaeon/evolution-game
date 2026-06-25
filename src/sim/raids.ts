@@ -59,7 +59,7 @@ export function maybeRaid(eng: SimEngine, e: Required<TechEffects>): void {
 }
 
 /** The tribe's defensive rating for a skirmish: shelter tier + defensive tech. */
-function defenseRating(s: SimState, e: Required<TechEffects>): number {
+export function defenseRating(s: SimState, e: Required<TechEffects>): number {
   const shelterTier = SHELTERS.indexOf(s.shelter); // 0 (cave) … 4 (city)
   // defenseMult is a lethality multiplier (<1 = better defended); invert to a
   // non-negative bonus so hunting/bronze/iron/gunpowder raise the rating.
