@@ -33,32 +33,33 @@ const UI_DEPTH = 100000;
 
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
-const DECOR_BY_BIOME: Record<Biome, string[]> = {
-  tundra: ["pine", "pine", "rock"],
-  forest: ["tree", "tree", "pine", "bush"],
-  river: ["tree", "tree", "bush"],
-  grassland: ["bush", "tree", "rock"],
-  desert: ["rock", "rock", "bush"],
-  coast: ["bush", "tree", "rock"],
-};
+/** The raw resources you can gather and spend. */
+type ResKind = "wood" | "food" | "stone";
 
-/** Placeable structures. Cost is paid from the tribe's food stores for now. */
+/** Placeable structures, each with a cost and a perk it grants. */
 interface BuildType {
   id: string;
   label: string;
   icon: string; // texture key
-  cost: number; // food
+  cost: { res: ResKind; amount: number };
 }
 const BUILD_TYPES: BuildType[] = [
-  { id: "campfire", label: "Campfire", icon: "fire-0", cost: 4 },
-  { id: "hut", label: "Hut", icon: "shelter-hut", cost: 12 },
-  { id: "farm", label: "Farm", icon: "crop", cost: 8 },
+  { id: "campfire", label: "Campfire", icon: "fire-0", cost: { res: "wood", amount: 5 } },
+  { id: "hut", label: "Hut", icon: "shelter-hut", cost: { res: "wood", amount: 15 } },
+  { id: "farm", label: "Farm", icon: "crop", cost: { res: "food", amount: 8 } },
 ];
 
 interface Npc {
   ind: Individual;
   sprite: Phaser.GameObjects.Image;
   baseKey: string;
+}
+
+/** A harvestable node in the world — a tree, bush, rock or planted crop. */
+interface Gatherable {
+  sprite: Phaser.GameObjects.Image;
+  kind: ResKind;
+  amount: number;
 }
 
 /**
@@ -95,6 +96,13 @@ export class WorldScene extends Phaser.Scene {
   private ghost!: Phaser.GameObjects.Image;
   private buildBtns: { type: BuildType; bg: Phaser.GameObjects.Rectangle }[] = [];
 
+  private solids: { x: number; y: number; r: number }[] = [];
+  private gatherables: Gatherable[] = [];
+  private gatherKey!: Phaser.Input.Keyboard.Key;
+  private gatherPrompt!: Phaser.GameObjects.Text;
+  private resHud!: Phaser.GameObjects.Text;
+  private housing = 0;
+
   constructor() {
     super("world");
   }
@@ -112,7 +120,7 @@ export class WorldScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor("#1d2a17");
 
     this.paintGround(biome);
-    this.scatterDecor(biome);
+    this.buildTerrain(biome);
     this.add.image(CAMP.x, CAMP.y - 6, "shelter-cave").setDepth(CAMP.y);
     if (this.ctrl.sim.state.knowledge.has("fire")) {
       this.add.image(CAMP.x + 2, CAMP.y + 30, "fire-0").setDepth(CAMP.y + 30);
@@ -137,6 +145,7 @@ export class WorldScene extends Phaser.Scene {
       left: [this.key("A"), this.key("LEFT")],
       right: [this.key("D"), this.key("RIGHT")],
     };
+    this.gatherKey = this.key("SPACE");
 
     // One handler does both jobs: a click on a tribe member talks; a click on the
     // ground walks there. `currentlyOver` is every interactive object under the
@@ -196,20 +205,64 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
-  private scatterDecor(biome: Biome): void {
-    const kinds = DECOR_BY_BIOME[biome];
+  private buildTerrain(biome: Biome): void {
+    if (biome === "river" || biome === "coast") this.addWater(biome);
+    if (biome === "tundra" || biome === "desert") this.addMountains();
+    this.scatterFlora(biome);
+  }
+
+  /** Impassable water — a winding river inland, or a band of sea on the coast. */
+  private addWater(biome: Biome): void {
+    const pts: [number, number][] =
+      biome === "river"
+        ? [[300, 170], [470, 360], [300, 580], [430, 840], [1080, 250], [1240, 520], [1180, 840]]
+        : [[1430, 140], [1500, 430], [1450, 710], [1510, 970], [1360, 980]];
+    for (const [x, y] of pts) {
+      if (Phaser.Math.Distance.Between(x, y, CAMP.x, CAMP.y) < CLEARING_R + 90) continue;
+      this.add.ellipse(x, y, 190, 150, 0x3b6ea5, 0.95).setDepth(2);
+      this.add.ellipse(x, y, 190, 150).setStrokeStyle(3, 0x2b537d).setDepth(2);
+      this.solids.push({ x, y, r: 78 });
+    }
+  }
+
+  /** Impassable mountains (massive rocks) for the harsh biomes. */
+  private addMountains(): void {
+    const spots: [number, number][] = [[250, 250], [1320, 300], [680, 900], [1180, 860], [430, 600]];
+    for (const [x, y] of spots) {
+      if (Phaser.Math.Distance.Between(x, y, CAMP.x, CAMP.y) < CLEARING_R + 90) continue;
+      this.add.image(x, y, "rock").setOrigin(0.5, 0.9).setScale(3.2).setDepth(y);
+      this.solids.push({ x, y, r: 30 });
+    }
+  }
+
+  /** Trees (wood), bushes (food) and rocks (stone) scattered as harvestable nodes. */
+  private scatterFlora(biome: Biome): void {
+    const counts: Record<Biome, [number, number, number]> = {
+      tundra: [8, 4, 12],
+      forest: [44, 14, 4],
+      river: [22, 18, 5],
+      grassland: [10, 20, 6],
+      desert: [3, 6, 14],
+      coast: [12, 14, 8],
+    };
+    const [trees, bushes, rocks] = counts[biome];
+    const treeKey = biome === "tundra" || biome === "forest" ? "pine" : "tree";
+    this.placeNodes(treeKey, trees, "wood", 3, 7);
+    this.placeNodes("bush", bushes, "food", 2, 0);
+    this.placeNodes("rock", rocks, "stone", 2, 7);
+  }
+
+  private placeNodes(key: string, n: number, kind: ResKind, amount: number, solidR: number): void {
     let placed = 0;
     let tries = 0;
-    const target = 150;
-    while (placed < target && tries++ < 4000) {
-      const x = Phaser.Math.Between(12, WORLD_W - 12);
-      const y = Phaser.Math.Between(20, WORLD_H - 12);
-      if (Phaser.Math.Distance.Between(x, y, CAMP.x, CAMP.y) < CLEARING_R + 10) continue;
-      const img = this.add
-        .image(x, y, Phaser.Utils.Array.GetRandom(kinds))
-        .setOrigin(0.5, 1)
-        .setDepth(y);
-      img.setData("solid", true);
+    while (placed < n && tries++ < n * 40) {
+      const x = Phaser.Math.Between(24, WORLD_W - 24);
+      const y = Phaser.Math.Between(40, WORLD_H - 20);
+      if (Phaser.Math.Distance.Between(x, y, CAMP.x, CAMP.y) < CLEARING_R + 16) continue;
+      if (this.solids.some((s) => Phaser.Math.Distance.Between(x, y, s.x, s.y) < s.r + 14)) continue;
+      const img = this.add.image(x, y, key).setOrigin(0.5, 1).setDepth(y);
+      if (solidR > 0) this.solids.push({ x, y, r: solidR });
+      this.gatherables.push({ sprite: img, kind, amount });
       placed++;
     }
   }
@@ -239,6 +292,7 @@ export class WorldScene extends Phaser.Scene {
       const baseKey = ensureHomininTexture(this, this.morphFor(ind));
       const sprite = this.add
         .image(x, y, baseKey)
+        .setOrigin(0.5, 1)
         .setDepth(y)
         .setInteractive({ useHandCursor: true });
       sprite.setData("npcId", ind.id);
@@ -258,7 +312,10 @@ export class WorldScene extends Phaser.Scene {
       skin: 7,
       hair: 3,
     });
-    this.player = this.add.image(CAMP.x, CAMP.y + 70, this.playerKey).setDepth(CAMP.y + 70);
+    this.player = this.add
+      .image(CAMP.x, CAMP.y + 70, this.playerKey)
+      .setOrigin(0.5, 1)
+      .setDepth(CAMP.y + 70);
     this.player.setScale(1.15);
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
   }
@@ -290,8 +347,32 @@ export class WorldScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(UI_DEPTH);
 
+    this.resHud = this.add
+      .text(10, 30, "", {
+        fontFamily: "monospace",
+        fontSize: "12px",
+        color: "#e9e0c8",
+        backgroundColor: "#00000066",
+        padding: { x: 6, y: 3 },
+      })
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH);
+
+    this.gatherPrompt = this.add
+      .text(0, 0, "", {
+        fontFamily: "monospace",
+        fontSize: "11px",
+        color: "#dff0c0",
+        backgroundColor: "#000000aa",
+        padding: { x: 4, y: 2 },
+      })
+      .setOrigin(0.5, 1)
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH)
+      .setVisible(false);
+
     this.add
-      .text(VIEW_W / 2, 28, "WASD / click to move  ·  click a villager to talk  ·  build from the bar (Esc cancels)", {
+      .text(VIEW_W / 2, 28, "WASD/click move · click a villager · Space to gather · build from the bar", {
         fontFamily: "monospace",
         fontSize: "10px",
         color: "#cfe0d0",
@@ -414,7 +495,7 @@ export class WorldScene extends Phaser.Scene {
         .setScrollFactor(0)
         .setDepth(UI_DEPTH + 1);
       this.add
-        .text(bx + 24, y + 5, `${t.label}\n${t.cost} food`, {
+        .text(bx + 24, y + 5, `${t.label}\n${t.cost.amount} ${t.cost.res}`, {
           fontFamily: "monospace",
           fontSize: "8px",
           color: "#e9e0c8",
@@ -458,21 +539,38 @@ export class WorldScene extends Phaser.Scene {
   private updateGhost(p: Phaser.Input.Pointer): void {
     if (!this.buildMode) return;
     this.ghost.setPosition(this.snap(p.worldX), this.snap(p.worldY));
-    const ok = this.ctrl.sim.state.resources.food >= this.buildMode.cost;
+    const cost = this.buildMode.cost;
+    const ok = this.ctrl.sim.state.resources[cost.res] >= cost.amount;
     this.ghost.setTint(ok ? 0x88ff88 : 0xff7a7a);
   }
 
   private tryPlace(p: Phaser.Input.Pointer): void {
     const t = this.buildMode;
     if (!t) return;
-    if (this.ctrl.sim.state.resources.food < t.cost) {
-      this.flash("Not enough food");
+    const res = this.ctrl.sim.state.resources;
+    if (res[t.cost.res] < t.cost.amount) {
+      this.flash(`Not enough ${t.cost.res}`);
       return;
     }
-    this.ctrl.sim.state.resources.food -= t.cost;
+    res[t.cost.res] -= t.cost.amount;
+    const wx = this.snap(p.worldX);
     const wy = this.snap(p.worldY);
-    this.add.image(this.snap(p.worldX), wy, t.icon).setOrigin(0.5, 0.85).setDepth(wy);
-    this.flash(`${t.label} built`);
+    if (t.id === "farm") {
+      // A farm is flat ground you walk over — and a renewable food source.
+      const crop = this.add.image(wx, wy, "crop").setDepth(2);
+      this.gatherables.push({ sprite: crop, kind: "food", amount: 12 });
+      this.flash("Farm built — Space to harvest food");
+    } else {
+      this.add.image(wx, wy, t.icon).setOrigin(0.5, 0.9).setDepth(wy);
+      if (t.id === "hut") {
+        this.housing += 1; // shelter for more of the tribe
+        this.solids.push({ x: wx, y: wy, r: 10 });
+        this.flash("Hut built — +1 housing");
+      } else {
+        this.add.ellipse(wx, wy, 72, 42, 0xffb066, 0.18).setDepth(1); // campfire's warm glow
+        this.flash("Campfire built — warmth");
+      }
+    }
     this.updateGhost(p); // refresh the affordability tint after spending
   }
 
@@ -503,8 +601,55 @@ export class WorldScene extends Phaser.Scene {
   override update(_t: number, dt: number): void {
     this.ctrl.update(dt); // keeps the world model alive (no-op while paused)
     this.movePlayer(dt);
+    this.updateGather();
     this.revealFog();
     this.syncHud();
+  }
+
+  private blocked(x: number, y: number): boolean {
+    const r = 7; // player half-width at the feet
+    return this.solids.some((s) => Phaser.Math.Distance.Between(x, y, s.x, s.y) < s.r + r);
+  }
+
+  // ── gathering ────────────────────────────────────────────────────────────
+
+  private updateGather(): void {
+    const node = this.nearestGatherable(34);
+    if (!node) {
+      this.gatherPrompt.setVisible(false);
+      return;
+    }
+    const cam = this.cameras.main;
+    this.gatherPrompt
+      .setText(`Space: gather ${node.kind}`)
+      .setPosition(node.sprite.x - cam.scrollX, node.sprite.y - cam.scrollY - node.sprite.displayHeight)
+      .setVisible(true);
+    if (Phaser.Input.Keyboard.JustDown(this.gatherKey)) this.gather(node);
+  }
+
+  private nearestGatherable(range: number): Gatherable | null {
+    let best: Gatherable | null = null;
+    let bestD = range;
+    for (const g of this.gatherables) {
+      const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, g.sprite.x, g.sprite.y);
+      if (d < bestD) {
+        bestD = d;
+        best = g;
+      }
+    }
+    return best;
+  }
+
+  private gather(node: Gatherable): void {
+    this.ctrl.sim.state.resources[node.kind] += 1;
+    node.amount -= 1;
+    this.flash(`+1 ${node.kind}`);
+    this.tweens.add({ targets: node.sprite, y: node.sprite.y - 3, yoyo: true, duration: 90 });
+    if (node.amount <= 0) {
+      const spr = node.sprite;
+      this.tweens.add({ targets: spr, alpha: 0, duration: 300, onComplete: () => spr.destroy() });
+      this.gatherables = this.gatherables.filter((g) => g !== node);
+    }
   }
 
   private movePlayer(dt: number): void {
@@ -532,8 +677,11 @@ export class WorldScene extends Phaser.Scene {
     const moving = len > 0.001;
     if (moving) {
       const step = PLAYER_SPEED * sec;
-      this.player.x = Phaser.Math.Clamp(this.player.x + (dx / len) * step, 12, WORLD_W - 12);
-      this.player.y = Phaser.Math.Clamp(this.player.y + (dy / len) * step, 40, WORLD_H - 12);
+      const nx = Phaser.Math.Clamp(this.player.x + (dx / len) * step, 12, WORLD_W - 12);
+      const ny = Phaser.Math.Clamp(this.player.y + (dy / len) * step, 40, WORLD_H - 12);
+      // Resolve each axis separately so you slide along obstacles instead of sticking.
+      if (!this.blocked(nx, this.player.y)) this.player.x = nx;
+      if (!this.blocked(this.player.x, ny)) this.player.y = ny;
       this.player.setDepth(this.player.y);
       if (Math.abs(dx) > 0.5) this.player.setFlipX(dx < 0);
 
@@ -568,8 +716,10 @@ export class WorldScene extends Phaser.Scene {
 
   private syncHud(): void {
     const s = this.ctrl.sim.state;
-    this.hud.setText(
-      `${s.era}   👥 ${this.ctrl.sim.living.length}   🍖 ${Math.floor(s.resources.food)}   ${s.biome}`,
+    this.hud.setText(`${s.era}   👥 ${this.ctrl.sim.living.length}   ${s.biome}`);
+    const r = s.resources;
+    this.resHud.setText(
+      `🍖 ${Math.floor(r.food)}   🪵 ${Math.floor(r.wood)}   🪨 ${Math.floor(r.stone)}   🏠 ${this.housing}`,
     );
   }
 }
