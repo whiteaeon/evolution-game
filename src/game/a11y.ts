@@ -73,6 +73,17 @@ export const BUILD_MARKER: Record<"ok" | "blocked", MarkerStyle> = {
   blocked: { glyph: "✕", color: "#ff5a5a" }, // red cross — can't afford it
 };
 
+/**
+ * Floating inspect markers over standout villagers: the band's leader (a crown)
+ * and notable individuals (a star). Distinct GLYPH and COLOUR so they never rely
+ * on hue alone — in greyscale a crown and a star still read apart. Mirrors the
+ * glyphs/colours WorldScene draws above the NPCs.
+ */
+export const INSPECT_MARKER: Record<"leader" | "notable", MarkerStyle> = {
+  leader: { glyph: "👑", color: "#ffe54a" }, // amber crown — the band's leader
+  notable: { glyph: "✦", color: "#bfe0ff" }, // pale star — a standout individual
+};
+
 /** One row of the marker legend in the help overlay: a styled glyph and its meaning. */
 export interface LegendEntry extends MarkerStyle {
   meaning: string;
@@ -100,4 +111,15 @@ export const QUEST_MARKER_LEGEND: readonly LegendEntry[] = [
 export const BUILD_MARKER_LEGEND: readonly LegendEntry[] = [
   { ...BUILD_MARKER.ok, meaning: "Build spot affordable — Enter or click to place" },
   { ...BUILD_MARKER.blocked, meaning: "Build spot too costly — gather more first" },
+];
+
+/**
+ * What the floating 👑 / ✦ over villagers mean. Derived from {@link INSPECT_MARKER}
+ * so the legend can never drift from the glyphs/colours the world draws. The "I"
+ * control row names the ✦ but, without this, the overlay never says what the crown
+ * and star stand for — or that pressing I (or clicking one) opens its inspect card.
+ */
+export const INSPECT_MARKER_LEGEND: readonly LegendEntry[] = [
+  { ...INSPECT_MARKER.leader, meaning: "Band leader — press I or click to inspect" },
+  { ...INSPECT_MARKER.notable, meaning: "Notable villager — press I or click to inspect" },
 ];
