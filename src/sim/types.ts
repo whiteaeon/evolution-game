@@ -185,6 +185,26 @@ export interface Region {
   y: number;
 }
 
+/**
+ * One settlement (camp). The tribe starts as a single home settlement; founding a
+ * second camp splits off some people into a discovered region. Each settlement
+ * keeps its own shelter, resources, members and task allocation and is subject to
+ * its own local biome pressures, while the tribe's knowledge/culture stays shared
+ * at the simulation level. Serialize-safe: every field is plain JSON data.
+ */
+export interface Settlement {
+  id: string;
+  name: string;
+  region: string;
+  biome: Biome;
+  shelter: Shelter;
+  resources: ResourcePools;
+  /** The people who live here. The home settlement aliases SimState.individuals. */
+  members: Individual[];
+  /** Per-settlement task allocation: how many members do each job. */
+  allocation: TaskAllocation;
+}
+
 export interface WorldState {
   /** Ice-age severity / ambient cold in [0, 1]. Higher = deadlier winters. */
   cold: number;

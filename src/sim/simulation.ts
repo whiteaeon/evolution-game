@@ -45,6 +45,7 @@ import {
   type Lineage,
   type ResourceCost,
   type ResourcePools,
+  type Settlement,
   type Shelter,
   type SimConfig,
   type SimEvent,
@@ -98,6 +99,7 @@ const BALANCE = {
   encounterInterval: 28, // ticks between possible neighbouring-group encounters
   migrateFoodPerHead: 1.6, // food spent per person per unit distance travelled
   migrateRisk: 0.5, // base per-person death chance over a full-map journey
+  foundFoodPerHead: 3, // provisions each migrant carries to a newly founded settlement
   foodStoragePerCapacity: 9, // soft cap: max stored food = carryingCapacity * this (bounds hoarding)
   // Scouting: idle hands sent out to chart the fogged regions of the world map.
   scoutBase: 0.05, // exploration progress per idle scout per tick toward the next region
@@ -306,6 +308,12 @@ export interface SimState {
   scoutProgress: number;
   /** AI neighbour tribes sharing the region map (pure sim; no diplomacy yet). */
   rivals: RivalTribe[];
+  /**
+   * The tribe's settlements. settlements[0] is the home camp (a live view whose
+   * resources/members/allocation alias the top-level state); a second camp, once
+   * founded via {@link Simulation.foundSettlement}, is a self-contained entry.
+   */
+  settlements: Settlement[];
   /** Lifetime tallies for the chronicle / stats / achievement screens. */
   totals: {
     births: number;
@@ -344,6 +352,12 @@ export class Simulation {
    * or replay — yet it is still saved/restored, so rivals resume deterministically.
    */
   private rivalRng: RNG;
+  /**
+   * Separate RNG stream for founded (secondary) settlements, mirroring rivalRng's
+   * isolation: a second camp's births and deaths never perturb the home tribe's
+   * stream, balance or replay, yet it is saved/restored so it resumes identically.
+   */
+  private settlementRng: RNG;
   private nextId = 1;
   state: SimState;
   allocation: TaskAllocation;
@@ -352,6 +366,7 @@ export class Simulation {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.rng = new RNG(this.config.seed);
     this.rivalRng = new RNG((this.config.seed ^ 0x5f3759df) >>> 0);
+    this.settlementRng = new RNG((this.config.seed ^ 0x85ebca6b) >>> 0);
     this.allocation = Object.fromEntries(TASKS.map((t) => [t, 0])) as TaskAllocation;
     this.state = this.createInitialState();
   }
@@ -365,10 +380,25 @@ export class Simulation {
     }
     const knowledge = new Knowledge();
     const region = regionById(this.config.startRegion ?? DEFAULT_REGION);
+    const resources: ResourcePools = { food: this.config.startingFood ?? 20, materials: 0, buildProgress: 0, wood: 0, stone: 0, hide: 0 };
+    // The home settlement is a live view: its resources/members/allocation are the
+    // SAME references as the top-level state, so the existing tick path drives it
+    // unchanged. region/biome/shelter mirror the top-level fields (kept in sync at
+    // their write sites: migrate + tryUpgradeShelter).
+    const home: Settlement = {
+      id: "home",
+      name: region.name,
+      region: region.id,
+      biome: region.biome,
+      shelter: "cave",
+      resources,
+      members: individuals,
+      allocation: this.allocation,
+    };
     return {
       tick: 0,
       individuals,
-      resources: { food: this.config.startingFood ?? 20, materials: 0, buildProgress: 0, wood: 0, stone: 0, hide: 0 },
+      resources,
       knowledge,
       world: { cold: this.config.baseCold, abundance: 1, season: 0, seasonIndex: 0 },
       shelter: "cave",
@@ -386,6 +416,7 @@ export class Simulation {
       scouts: 0,
       scoutProgress: 0,
       rivals: createRivals(this.rivalRng, region.id),
+      settlements: [home],
       totals: {
         births: 0,
         deaths: 0,
@@ -415,11 +446,12 @@ export class Simulation {
     age: number,
     motherId?: number,
     fatherId?: number,
+    rng: RNG = this.rng,
   ): Individual {
     return {
       id: this.nextId++,
       genome,
-      sex: this.rng.chance(0.5) ? "f" : "m",
+      sex: rng.chance(0.5) ? "f" : "m",
       age,
       generation,
       motherId,
@@ -485,10 +517,69 @@ export class Simulation {
     }
     s.region = target.id;
     s.biome = target.biome;
+    s.settlements[0].region = target.id;
+    s.settlements[0].biome = target.biome;
     s.totals.migrations++;
     if (!s.totals.biomesVisited.includes(target.biome)) s.totals.biomesVisited.push(target.biome);
     this.logEvent("milestone", `The tribe migrates to ${target.name} (${target.biome})${deaths ? ` — ${deaths} lost on the journey` : ""}.`);
     return deaths;
+  }
+
+  /**
+   * Found a second settlement in a discovered region, splitting off `migrants`
+   * able adults from the home camp. The new camp keeps its own shelter, resources,
+   * members and task allocation and is subject to its own local biome pressures,
+   * while the tribe's knowledge/culture stays shared. The scope is exactly two
+   * settlements: this is a no-op (returns null) once a second one exists, if the
+   * region is not yet charted, or if the home camp cannot spare the people.
+   * Draws nothing from the home RNG stream, so it never perturbs the home replay.
+   */
+  foundSettlement(regionId: string, migrants: number): Settlement | null {
+    const s = this.state;
+    if (s.settlements.length >= 2) return null; // exactly two settlements
+    if (!s.discoveredRegions.includes(regionId)) return null;
+    const n = Math.floor(migrants);
+    if (n < 1) return null;
+    // Pick able adults deterministically (lowest ids first) — no RNG draw.
+    const eligible = this.living
+      .filter((i) => i.age >= this.config.reproMinAge - 4 && i.health > 0.15)
+      .sort((a, b) => a.id - b.id);
+    if (eligible.length - n < 2) return null; // leave at least two able adults home
+    const chosen = eligible.slice(0, n);
+    const region = regionById(regionId);
+
+    // The migrants carry provisions; the rest of their pool stays at home.
+    const stake = Math.min(s.resources.food, n * BALANCE.foundFoodPerHead);
+    s.resources.food -= stake;
+
+    // Remove the migrants from the home pool so the home tick stops processing
+    // them, then re-alias the home settlement's view and rebuild the living cache.
+    const leaving = new Set(chosen.map((c) => c.id));
+    s.individuals = s.individuals.filter((i) => !leaving.has(i.id));
+    s.settlements[0].members = s.individuals;
+    this.resetLivingCache();
+
+    const st: Settlement = {
+      id: `settlement-${s.settlements.length + 1}`,
+      name: region.name,
+      region: region.id,
+      biome: region.biome,
+      shelter: "cave",
+      resources: { food: stake, materials: 0, buildProgress: 0, wood: 0, stone: 0, hide: 0 },
+      members: chosen,
+      allocation: { ...this.allocation },
+    };
+    s.settlements.push(st);
+    if (!s.totals.biomesVisited.includes(region.biome)) s.totals.biomesVisited.push(region.biome);
+    this.logEvent("milestone", `A party of ${n} leaves to found ${st.name} (${region.biome}).`);
+    return st;
+  }
+
+  /** Set how many members of a settlement (by array index) do a given task. */
+  setSettlementAllocation(index: number, task: Task, count: number): void {
+    const st = this.state.settlements[index];
+    if (!st) return;
+    st.allocation[task] = Math.max(0, Math.floor(count));
   }
 
   autoAllocate(weights: Partial<Record<Task, number>>): void {
@@ -523,6 +614,17 @@ export class Simulation {
     this.livingHasDead = true;
   }
 
+  /**
+   * Force a full rebuild of the living cache. Used when state.individuals is
+   * replaced wholesale (e.g. founding a settlement removes departing members),
+   * which the incremental tail-scan cannot track.
+   */
+  private resetLivingCache(): void {
+    this.livingCache = [];
+    this.livingSeen = 0;
+    this.livingHasDead = false;
+  }
+
   get living(): Individual[] {
     const all = this.state.individuals;
     if (this.livingSeen < all.length) {
@@ -540,7 +642,14 @@ export class Simulation {
 
   /** Look up any individual (living or dead) by id — for the family tree. */
   individualById(id: number): Individual | undefined {
-    return this.state.individuals.find((i) => i.id === id);
+    const home = this.state.individuals.find((i) => i.id === id);
+    if (home) return home;
+    // settlements[0] aliases state.individuals (searched above); scan the rest.
+    for (let i = 1; i < this.state.settlements.length; i++) {
+      const m = this.state.settlements[i].members.find((x) => x.id === id);
+      if (m) return m;
+    }
+    return undefined;
   }
 
   traitAverages(): TraitAverages {
@@ -586,6 +695,11 @@ export class Simulation {
     // tribe's carrying capacity (shelter tier / biome / tech), keeping mid/late
     // game tension. Clamped after every tick so observers always see it bounded.
     s.resources.food = Math.min(s.resources.food, this.foodStorageCap(effects));
+
+    // Founded settlements run their own lifecycle last, after (and isolated from)
+    // the home tribe — on a separate RNG stream — so they never perturb the home
+    // simulation, balance or replay. A run that never founds one is byte-identical.
+    this.tickSecondarySettlements(effects);
   }
 
   run(ticks: number): void {
@@ -811,7 +925,7 @@ export class Simulation {
     const s = this.state;
     for (const ind of this.living) {
       ind.age++;
-      if (this.rng.chance(this.mortalityProb(ind, e))) {
+      if (this.rng.chance(this.mortalityProb(ind, e, s.shelter, this.biome(), s.world.cold))) {
         ind.alive = false;
         s.totals.deaths++;
         this.invalidateLiving();
@@ -819,20 +933,30 @@ export class Simulation {
     }
   }
 
-  private mortalityProb(ind: Individual, e: Required<TechEffects>): number {
-    const s = this.state;
+  /**
+   * Per-individual death probability under a given shelter / biome / ambient cold.
+   * Parameterised so both the home tribe and any founded settlement run the exact
+   * same mortality model against their own local conditions (biome pressures).
+   */
+  private mortalityProb(
+    ind: Individual,
+    e: Required<TechEffects>,
+    shelter: Shelter,
+    b: BiomeProfile,
+    cold: number,
+  ): number {
     let p = 0;
     if (ind.age > this.config.reproMaxAge) {
       p += 0.02 + Math.pow(
         (ind.age - this.config.reproMaxAge) / (this.config.maxAge - this.config.reproMaxAge), 2,
       ) * 0.5;
     }
-    const warmth = SHELTER_DEF[s.shelter].warmth + e.warmth;
-    const exposure = clamp01(s.world.cold - ind.genome.coldTolerance - warmth);
+    const warmth = SHELTER_DEF[shelter].warmth + e.warmth;
+    const exposure = clamp01(cold - ind.genome.coldTolerance - warmth);
     p += exposure * BALANCE.coldLethality;
     if (ind.food <= 0.05) p += BALANCE.starveLethality;
     // Endemic disease, scaled by the biome and attenuated by medicine/sanitation.
-    p += (1 - ind.genome.diseaseResistance) * BALANCE.chronicDisease * this.biome().diseaseMult * (1 - e.diseaseDefense);
+    p += (1 - ind.genome.diseaseResistance) * BALANCE.chronicDisease * b.diseaseMult * (1 - e.diseaseDefense);
     p += (1 - ind.health) * 0.04;
     return clamp01(p);
   }
@@ -1284,17 +1408,19 @@ export class Simulation {
     // Fitness is constant across the loop (nothing it reads is mutated here), so
     // compute each pool's weights once instead of re-scanning per birth — the
     // old per-call map made selection O(females²) at large populations.
-    const { weights: femaleWeights, total: femaleTotal } = this.fitnessWeights(females, e);
-    const { weights: maleWeights, total: maleTotal } = this.fitnessWeights(males, e);
+    const b = this.biome();
+    const cold = s.world.cold;
+    const { weights: femaleWeights, total: femaleTotal } = this.fitnessWeights(females, e, b, cold, s.cookingActive);
+    const { weights: maleWeights, total: maleTotal } = this.fitnessWeights(males, e, b, cold, s.cookingActive);
 
     for (let n = 0; n < females.length; n++) {
       if (pop >= capacity) break;
       if (s.resources.food < BALANCE.birthFoodCost) break;
-      const mother = this.pickByWeights(females, femaleWeights, femaleTotal);
+      const mother = this.pickByWeights(females, femaleWeights, femaleTotal, this.rng);
       const pBirth = 0.85 * e.birthMult * mother.health * (0.45 + 0.55 * foodSecurity);
       if (!this.rng.chance(pBirth)) continue;
 
-      const father = this.pickByWeights(males, maleWeights, maleTotal);
+      const father = this.pickByWeights(males, maleWeights, maleTotal, this.rng);
       const childGenome = inherit(mother.genome, father.genome, this.rng, this.config.mutationRate);
       const child = this.makeIndividual(
         childGenome,
@@ -1312,11 +1438,15 @@ export class Simulation {
     }
   }
 
-  carryingCapacity(e: Required<TechEffects>): number {
+  carryingCapacity(
+    e: Required<TechEffects>,
+    shelter: Shelter = this.state.shelter,
+    b: BiomeProfile = this.biome(),
+  ): number {
     return (
       this.config.carryingCapacityBase +
-      SHELTER_DEF[this.state.shelter].capacity +
-      this.biome().capacity +
+      SHELTER_DEF[shelter].capacity +
+      b.capacity +
       e.capacityBonus
     );
   }
@@ -1329,15 +1459,18 @@ export class Simulation {
   private fitnessWeights(
     pool: Individual[],
     e: Required<TechEffects>,
+    b: BiomeProfile,
+    cold: number,
+    cookingActive: boolean,
   ): { weights: number[]; total: number } {
-    const weights = pool.map((m) => this.fitness(m, e));
+    const weights = pool.map((m) => this.fitness(m, e, b, cold, cookingActive));
     let total = 0;
     for (const w of weights) total += w;
     return { weights, total };
   }
 
-  private pickByWeights(pool: Individual[], weights: number[], total: number): Individual {
-    let r = this.rng.next() * total;
+  private pickByWeights(pool: Individual[], weights: number[], total: number, rng: RNG): Individual {
+    let r = rng.next() * total;
     for (let i = 0; i < pool.length; i++) {
       r -= weights[i];
       if (r <= 0) return pool[i];
@@ -1345,16 +1478,20 @@ export class Simulation {
     return pool[pool.length - 1];
   }
 
-  private fitness(ind: Individual, e: Required<TechEffects>): number {
-    const s = this.state;
-    const b = this.biome();
+  private fitness(
+    ind: Individual,
+    e: Required<TechEffects>,
+    b: BiomeProfile,
+    cold: number,
+    cookingActive: boolean,
+  ): number {
     let f = 0.2 + ind.health;
-    f += ind.genome.coldTolerance * s.world.cold;
+    f += ind.genome.coldTolerance * cold;
     f += ind.genome.strength * 0.3 + ind.genome.dexterity * 0.2;
     // The biome rewards a particular trait — location shapes the lineage.
     f += ind.genome[b.selectTrait] * b.selectWeight;
     // Cooked food + schooling reward bigger brains.
-    const intelPressure = (s.cookingActive || ind.ateCooked ? BALANCE.cookingIntelWeight : 0) + e.intelPressure;
+    const intelPressure = (cookingActive || ind.ateCooked ? BALANCE.cookingIntelWeight : 0) + e.intelPressure;
     if (intelPressure > 0) f += ind.genome.intelligence * intelPressure;
     return Math.max(0.01, f);
   }
@@ -1371,18 +1508,27 @@ export class Simulation {
     s.resources.buildProgress -= def.buildCost;
     this.spendResources(def.cost);
     s.shelter = next;
+    s.settlements[0].shelter = next;
     this.logEvent("milestone", `The tribe builds a ${next}.`);
   }
 
   /** Whether the tribe currently holds at least the resources in `req`. */
   private hasResources(req: ResourceCost): boolean {
-    const r = this.state.resources;
+    return this.hasResourcesIn(this.state.resources, req);
+  }
+
+  /** Deduct a resource bill from the home pools (assumes {@link hasResources}). */
+  private spendResources(req: ResourceCost): void {
+    this.spendResourcesIn(this.state.resources, req);
+  }
+
+  /** Whether the given pool holds at least the resources in `req`. */
+  private hasResourcesIn(r: ResourcePools, req: ResourceCost): boolean {
     return (req.wood ?? 0) <= r.wood && (req.stone ?? 0) <= r.stone && (req.hide ?? 0) <= r.hide;
   }
 
-  /** Deduct a resource bill from the pools (assumes {@link hasResources}). */
-  private spendResources(req: ResourceCost): void {
-    const r = this.state.resources;
+  /** Deduct a resource bill from the given pool (assumes {@link hasResourcesIn}). */
+  private spendResourcesIn(r: ResourcePools, req: ResourceCost): void {
     if (req.wood) r.wood -= req.wood;
     if (req.stone) r.stone -= req.stone;
     if (req.hide) r.hide -= req.hide;
@@ -1472,18 +1618,253 @@ export class Simulation {
     this.logEvent("dialogue", `“${pickDialogueLine(situation, this.state.tick)}”`);
   }
 
+  // ── secondary settlements ──────────────────────────────────────────────────
+
+  /** Run every founded (non-home) settlement one tick, isolated from the home. */
+  private tickSecondarySettlements(e: Required<TechEffects>): void {
+    const settlements = this.state.settlements;
+    for (let i = 1; i < settlements.length; i++) this.tickSettlement(settlements[i], e);
+  }
+
+  /**
+   * One settlement's lifecycle for a tick: production, consumption + needs,
+   * local-biome mortality, reproduction and shelter upgrades. Production shares the
+   * tribe's tech effects and feeds the shared knowledge tree, but everything else
+   * (resources, members, shelter, biome pressures) is the settlement's own. All
+   * stochastic steps draw on {@link settlementRng}, never the home stream.
+   */
+  private tickSettlement(st: Settlement, e: Required<TechEffects>): void {
+    const s = this.state;
+    const k = s.knowledge;
+    const b = BIOME_PROFILE[st.biome];
+    // Local biome conditions: same season as home, but this settlement's biome —
+    // mirrors updateWorld's formula so cold/abundance pressures are truly local.
+    const season = s.world.season;
+    const seasonal = Math.cos(season * Math.PI * 2) * 0.18;
+    const cold = clamp01(this.config.baseCold + b.coldAdd + seasonal);
+    const abundance =
+      (0.9 + Math.sin(season * Math.PI * 2) * 0.2 + e.abundance + (this.config.abundanceBonus ?? 0)) *
+      b.abundance;
+
+    const alive = st.members.filter((m) => m.alive);
+    const workers = this.distributeForSettlement(alive, st.allocation);
+
+    // ── produce ──
+    let food = 0;
+    let hide = 0;
+    for (const w of workers.gather) {
+      const techMult = k.has("gathering") ? 1 : 0.95;
+      food += BALANCE.gatherBase * (0.5 + w.genome.dexterity) * e.gatherMult * b.gatherMult * techMult * abundance;
+    }
+    for (const w of workers.hunt) {
+      const techMult = k.has("hunting") ? 1 : 0.6;
+      food += BALANCE.huntBase * (0.5 + w.genome.strength) * e.huntMult * b.huntMult * techMult * abundance;
+      hide += BALANCE.hidePerHunter * (0.5 + w.genome.strength) * e.huntMult * b.hide;
+    }
+    food *= e.foodMult;
+    st.resources.food += food;
+    st.resources.hide += hide;
+
+    const cookingActive = k.has("cooking") && workers.cook.length > 0 && st.resources.food > 0;
+
+    let build = 0;
+    let wood = 0;
+    let stone = 0;
+    for (const w of workers.build) {
+      const eff = 0.5 + w.genome.strength * 0.5 + w.genome.dexterity * 0.5;
+      build += BALANCE.buildBase * eff * e.buildMult;
+      wood += BALANCE.woodPerBuilder * eff * e.buildMult * b.wood;
+      stone += BALANCE.stonePerBuilder * eff * e.buildMult * b.stone;
+    }
+    st.resources.buildProgress += build;
+    st.resources.materials += build * 0.2;
+    st.resources.wood += wood;
+    st.resources.stone += stone;
+
+    // Research feeds the shared knowledge tree — culture is tribe-wide.
+    this.settlementResearch(workers.research, e);
+
+    // ── consume + needs ──
+    const perCapita =
+      BALANCE.consumptionPerCapita * (cookingActive ? BALANCE.cookedConsumptionFactor : 1);
+    const need = alive.length * perCapita;
+    const shortage = st.resources.food < need;
+    st.resources.food = Math.max(0, st.resources.food - need);
+    const warmth = SHELTER_DEF[st.shelter].warmth + e.warmth;
+    for (const ind of alive) {
+      ind.food = shortage ? clamp01(ind.food - 0.35) : clamp01(ind.food + 0.3);
+      ind.ateCooked = cookingActive && !shortage;
+      const exposure = clamp01(cold - ind.genome.coldTolerance - warmth);
+      ind.warmth = clamp01(1 - exposure - (shortage ? 0.1 : 0));
+      const target = (ind.food + ind.warmth) / 2;
+      ind.health = clamp01(ind.health * 0.6 + target * 0.4);
+    }
+
+    // ── age + die (local biome pressures) ──
+    for (const ind of alive) {
+      ind.age++;
+      if (this.settlementRng.chance(this.mortalityProb(ind, e, st.shelter, b, cold))) {
+        ind.alive = false;
+        s.totals.deaths++;
+      }
+    }
+
+    // ── reproduce ──
+    this.reproduceSettlement(st, e, b, cold, cookingActive);
+
+    // ── shelter upgrade + soft food cap ──
+    this.tryUpgradeSettlementShelter(st);
+    st.resources.food = Math.min(
+      st.resources.food,
+      this.carryingCapacity(e, st.shelter, b) * BALANCE.foodStoragePerCapacity,
+    );
+  }
+
+  /** Assign a settlement's able adults to tasks by its own allocation. */
+  private distributeForSettlement(
+    alive: Individual[],
+    allocation: TaskAllocation,
+  ): Record<Task, Individual[]> {
+    const adults = alive.filter(
+      (i) => i.age >= this.config.reproMinAge - 4 && i.health > 0.15,
+    );
+    const pool = [...adults].sort((a, b) => a.id - b.id);
+    const out = Object.fromEntries(TASKS.map((t) => [t, [] as Individual[]])) as Record<
+      Task,
+      Individual[]
+    >;
+    let idx = 0;
+    for (const task of TASKS) {
+      if (task === "idle") continue;
+      const want = allocation[task];
+      for (let n = 0; n < want && idx < pool.length; n++) out[task].push(pool[idx++]);
+    }
+    while (idx < pool.length) out.idle.push(pool[idx++]);
+    return out;
+  }
+
+  /**
+   * A settlement's researchers push points onto the shared knowledge tree's
+   * current target — the same model as {@link doResearch}, but its raw-resource
+   * gate reads the home stock (the tribe's shared store) so resource-gated techs
+   * never silently spend a settlement's own pool.
+   */
+  private settlementResearch(researchers: Individual[], e: Required<TechEffects>): void {
+    const s = this.state;
+    if (researchers.length === 0) return;
+    if (
+      !s.researchTarget ||
+      s.knowledge.has(s.researchTarget) ||
+      !s.knowledge.isUnlocked(s.researchTarget)
+    ) {
+      s.researchTarget = this.pickResearchTarget();
+    }
+    if (!s.researchTarget) return;
+    const cooperation = 1 + 0.06 * s.knowledge.languageLevel();
+    let perHead = 0;
+    for (const w of researchers) {
+      const speechBonus = 1 + w.genome.speech * 0.5;
+      perHead += BALANCE.researchBase * (0.5 + w.genome.intelligence) * speechBonus;
+    }
+    const teamSize = Math.max(1, researchers.length);
+    let points = (perHead / teamSize) * Math.pow(teamSize, BALANCE.researchCrowding);
+    points *= Math.pow(e.researchMult, BALANCE.researchCompression) * cooperation;
+    if (points <= 0) return;
+    const req = TECH_TREE[s.researchTarget].resourceCost;
+    const ready = !req || this.hasResources(req);
+    const completed = s.knowledge.addProgress(s.researchTarget, points, ready);
+    if (completed) {
+      if (req) this.spendResources(req);
+      const def = TECH_TREE[completed];
+      const kind: SimEventType = def.unlocksEra ? "milestone" : "discovery";
+      this.logEvent(kind, def.unlocksEra ? `${def.name} — the ${def.unlocksEra} begins!` : `Discovered ${def.name}.`);
+      s.researchTarget = this.pickResearchTarget();
+    }
+  }
+
+  /** Reproduction within a settlement — mirrors {@link reproduce} on its own pool. */
+  private reproduceSettlement(
+    st: Settlement,
+    e: Required<TechEffects>,
+    b: BiomeProfile,
+    cold: number,
+    cookingActive: boolean,
+  ): void {
+    const s = this.state;
+    const alive = st.members.filter((m) => m.alive);
+    const adults = alive.filter(
+      (i) => i.age >= this.config.reproMinAge && i.age <= this.config.reproMaxAge && i.health > 0.3,
+    );
+    const females = adults.filter((i) => i.sex === "f");
+    const males = adults.filter((i) => i.sex === "m");
+    if (females.length === 0 || males.length === 0) return;
+
+    const capacity = this.carryingCapacity(e, st.shelter, b);
+    let pop = alive.length;
+    const foodSecurity = clamp01(st.resources.food / (pop * 2 + 1));
+    const { weights: fw, total: ft } = this.fitnessWeights(females, e, b, cold, cookingActive);
+    const { weights: mw, total: mt } = this.fitnessWeights(males, e, b, cold, cookingActive);
+
+    for (let n = 0; n < females.length; n++) {
+      if (pop >= capacity) break;
+      if (st.resources.food < BALANCE.birthFoodCost) break;
+      const mother = this.pickByWeights(females, fw, ft, this.settlementRng);
+      const pBirth = 0.85 * e.birthMult * mother.health * (0.45 + 0.55 * foodSecurity);
+      if (!this.settlementRng.chance(pBirth)) continue;
+      const father = this.pickByWeights(males, mw, mt, this.settlementRng);
+      const childGenome = inherit(mother.genome, father.genome, this.settlementRng, this.config.mutationRate);
+      const child = this.makeIndividual(
+        childGenome,
+        Math.max(mother.generation, father.generation) + 1,
+        0,
+        mother.id,
+        father.id,
+        this.settlementRng,
+      );
+      if (mother.lineage || father.lineage) child.lineage = mother.lineage ?? father.lineage;
+      st.members.push(child);
+      st.resources.food -= BALANCE.birthFoodCost;
+      s.totals.births++;
+      pop++;
+    }
+  }
+
+  /** Upgrade a settlement's shelter from its own labour + raw resources. */
+  private tryUpgradeSettlementShelter(st: Settlement): void {
+    const idx = SHELTERS.indexOf(st.shelter);
+    if (idx >= SHELTERS.length - 1) return;
+    const next = SHELTERS[idx + 1];
+    const def = SHELTER_DEF[next];
+    if (eraIndex(this.state.era) < eraIndex(def.minEra)) return; // era-gated (shared era)
+    if (st.resources.buildProgress < def.buildCost) return; // labor gate
+    if (!this.hasResourcesIn(st.resources, def.cost)) return; // raw-material gate
+    st.resources.buildProgress -= def.buildCost;
+    this.spendResourcesIn(st.resources, def.cost);
+    st.shelter = next;
+    this.logEvent("milestone", `${st.name} builds a ${next}.`);
+  }
+
   // ── save / load ──────────────────────────────────────────────────────────
 
   /** Serialize the entire run to a JSON string (RNG state included). */
   serialize(): string {
+    // The home settlement (settlements[0]) is a live view whose members/resources/
+    // allocation alias the top-level state; store it trimmed to avoid duplicating
+    // those (re-aliased on load). Founded settlements are stored in full.
+    const settlements = this.state.settlements.map((st, i) =>
+      i === 0
+        ? { id: st.id, name: st.name, region: st.region, biome: st.biome, shelter: st.shelter }
+        : st,
+    );
     return JSON.stringify({
       v: 1,
       config: this.config,
       rng: this.rng.getState(),
       rivalRng: this.rivalRng.getState(),
+      settlementRng: this.settlementRng.getState(),
       nextId: this.nextId,
       allocation: this.allocation,
-      state: { ...this.state, knowledge: this.state.knowledge.serialize() },
+      state: { ...this.state, knowledge: this.state.knowledge.serialize(), settlements },
     });
   }
 
@@ -1493,6 +1874,7 @@ export class Simulation {
     const sim = new Simulation(data.config);
     sim.rng.setState(data.rng);
     if (typeof data.rivalRng === "number") sim.rivalRng.setState(data.rivalRng);
+    if (typeof data.settlementRng === "number") sim.settlementRng.setState(data.settlementRng);
     sim.nextId = data.nextId;
     sim.allocation = data.allocation;
     sim.state = { ...data.state, knowledge: Knowledge.deserialize(data.state.knowledge) };
@@ -1500,6 +1882,30 @@ export class Simulation {
     if (!sim.state.discoveredRegions) sim.state.discoveredRegions = [sim.state.region];
     if (typeof sim.state.scouts !== "number") sim.state.scouts = 0;
     if (typeof sim.state.scoutProgress !== "number") sim.state.scoutProgress = 0;
+    sim.state.settlements = sim.rebuildSettlements((data.state as { settlements?: Settlement[] }).settlements);
     return sim;
+  }
+
+  /**
+   * Reconstruct the settlements array on load: settlements[0] is the home view,
+   * re-aliased to the freshly-deserialized top-level members/resources/allocation;
+   * any founded settlements are restored as-is. Tolerates pre-settlement saves.
+   */
+  private rebuildSettlements(raw: Settlement[] | undefined): Settlement[] {
+    const s = this.state;
+    const stored = Array.isArray(raw) ? raw[0] : undefined;
+    const home: Settlement = {
+      id: stored?.id ?? "home",
+      name: stored?.name ?? regionById(s.region).name,
+      region: s.region,
+      biome: s.biome,
+      shelter: s.shelter,
+      resources: s.resources,
+      members: s.individuals,
+      allocation: this.allocation,
+    };
+    const out: Settlement[] = [home];
+    if (Array.isArray(raw)) for (let i = 1; i < raw.length; i++) out.push(raw[i]);
+    return out;
   }
 }
