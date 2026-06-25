@@ -20,4 +20,12 @@ describe("particleBudget", () => {
   it("never returns a negative count", () => {
     expect(particleBudget(100, 7, 60)).toBeGreaterThanOrEqual(0);
   });
+
+  it("recovers the full budget once the live count is reset to a clean slate", () => {
+    // A leaked active count (e.g. left high after a scene restart killed the
+    // in-flight tweens before their onComplete decrements ran) starves every
+    // future burst; resetting the count back to 0 restores the full headroom.
+    expect(particleBudget(90, 7, 90)).toBe(0); // leaked at the cap → no bursts
+    expect(particleBudget(0, 7, 90)).toBe(7); // reset to 0 → full burst again
+  });
 });
