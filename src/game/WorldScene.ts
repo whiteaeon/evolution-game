@@ -24,6 +24,7 @@ import { buildRaidSides, resolveRaid } from "./raidDefense.js";
 import { raidPressed } from "./raidPeace.js";
 import { outbreakRisk } from "./epidemicRisk.js";
 import { isPointVisible } from "./cull.js";
+import { npcOnScreen } from "./npcCull.js";
 import { particleBudget } from "./particleBudget.js";
 import { nightGlowAlpha } from "./nightGlow.js";
 import { removeSolid, type Solid } from "./solids.js";
@@ -1839,8 +1840,12 @@ export class WorldScene extends Phaser.Scene {
       this.npcPhase = (this.npcPhase + 1) & 3;
     }
     const speed = (16 * dt) / 1000;
+    const view = this.cameras.main.worldView;
     this.npcs.forEach((n, i) => {
       const s = n.sprite;
+      // Off-screen villagers are purely decorative; skip their texture/scale and
+      // re-pick work until they scroll back into view (they resume from here).
+      if (!npcOnScreen(s.x, s.y, view)) return;
       const dx = n.tx - s.x;
       const dy = n.ty - s.y;
       const d = Math.hypot(dx, dy);
