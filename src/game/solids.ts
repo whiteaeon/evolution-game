@@ -20,3 +20,18 @@ export function removeSolid(solids: Solid[], solid: Solid | undefined): Solid[] 
   if (!solid) return solids.slice();
   return solids.filter((s) => s !== solid);
 }
+
+/**
+ * True when a body of radius `bodyR` centred at `(x, y)` overlaps any solid.
+ * The player's movement probes several candidate steps every frame, so the test
+ * stays on squared distances — `d < r` iff `d² < r²` for non-negative values —
+ * to skip a `sqrt` per solid per probe. Pure (no Phaser) so it stays testable.
+ */
+export function isBlocked(x: number, y: number, solids: readonly Solid[], bodyR: number): boolean {
+  return solids.some((s) => {
+    const dx = x - s.x;
+    const dy = y - s.y;
+    const reach = s.r + bodyR;
+    return dx * dx + dy * dy < reach * reach;
+  });
+}
