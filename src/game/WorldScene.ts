@@ -19,6 +19,7 @@ import { depletionScale } from "./nodeDepletion.js";
 import { questMetric, type QuestMetrics, type QuestSpec } from "./quests.js";
 import { buildDialogue, type DialogNode } from "./dialogue.js";
 import { buildRaidSides, resolveRaid } from "./raidDefense.js";
+import { raidPressed } from "./raidPeace.js";
 import { outbreakRisk } from "./epidemicRisk.js";
 import { isPointVisible } from "./cull.js";
 import { particleBudget } from "./particleBudget.js";
@@ -2849,7 +2850,17 @@ export class WorldScene extends Phaser.Scene {
       // Don't open a raid over a blocking panel/dialog; just hold the timer.
       if (this.dialogOpen || this.techPanelOpen || this.inspectOpen) return;
       this.raidTimer -= dt;
-      if (this.raidTimer <= 0) this.startRaid();
+      if (this.raidTimer <= 0) {
+        // A neighbour the player has warmed to friendly (via gifts) stays its
+        // hand — the rival's player-built relations, surfaced into the raid loop,
+        // make diplomacy a real defence. An un-courted neighbour (relations 0)
+        // still presses, so the raid threat is unchanged without diplomacy.
+        if (raidPressed(this.rival.relations)) this.startRaid();
+        else {
+          this.raidTimer = RAID_REPEAT_MS;
+          this.flash(`${this.rival.name} hold their peace — your friendship stays their hand`);
+        }
+      }
       return;
     }
 
