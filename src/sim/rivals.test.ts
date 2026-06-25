@@ -179,6 +179,13 @@ describe("skirmish resolution", () => {
   });
 });
 
+describe("raid tunables", () => {
+  it("raidChance is a probability in [0, 1]", () => {
+    expect(RAID_BALANCE.raidChance).toBeGreaterThanOrEqual(0);
+    expect(RAID_BALANCE.raidChance).toBeLessThanOrEqual(1);
+  });
+});
+
 describe("rival raids in the simulation", () => {
   // Count raids attributable to the given rival names (generic predator raids
   // carry no rival name), scanning the (capped) log fresh after every tick.

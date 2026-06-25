@@ -70,6 +70,8 @@ export const RAID_BALANCE = {
   hostileRelations: -0.5,
   /** Ticks between possible raids (timing drawn on the rival RNG stream). */
   raidInterval: 53,
+  /** Chance a raid actually fires on an interval tick with a hostile rival present. */
+  raidChance: 0.5,
   /** Max fraction of either side that can fall in a single skirmish. */
   maxLossFrac: 0.3,
   /** Player defensive rating gained per shelter tier (cave→city). */
