@@ -12,6 +12,7 @@ import {
 import { HOMININ_WALK, homininFrameKey } from "./homininWalk.js";
 import { chooseNpcActivity, type NpcActivity } from "./npcActivity.js";
 import { pickGatherTarget } from "./gatherTarget.js";
+import { depletionScale } from "./nodeDepletion.js";
 import { questMetric, type QuestMetrics, type QuestSpec } from "./quests.js";
 import { buildDialogue, type DialogNode } from "./dialogue.js";
 import { buildRaidSides, resolveRaid } from "./raidDefense.js";
@@ -184,6 +185,7 @@ interface Gatherable {
   sprite: Phaser.GameObjects.Image;
   kind: ResKind;
   amount: number;
+  init: number; // amount at spawn, so the sprite can shrink as it depletes
   farm?: boolean; // true for crops on a farm the player placed
 }
 
@@ -764,7 +766,7 @@ export class WorldScene extends Phaser.Scene {
       if (this.solids.some((s) => Phaser.Math.Distance.Between(x, y, s.x, s.y) < s.r + 14)) continue;
       const img = this.add.image(x, y, key).setOrigin(0.5, 1).setDepth(y);
       if (solidR > 0) this.solids.push({ x, y, r: solidR });
-      this.gatherables.push({ sprite: img, kind, amount });
+      this.gatherables.push({ sprite: img, kind, amount, init: amount });
       placed++;
     }
   }
@@ -1450,7 +1452,7 @@ export class WorldScene extends Phaser.Scene {
       // A farm is flat ground you walk over — and a renewable food source.
       const crop = this.add.image(wx, wy, "crop").setDepth(2);
       this.raiseIn(crop);
-      this.gatherables.push({ sprite: crop, kind: "food", amount, farm: true });
+      this.gatherables.push({ sprite: crop, kind: "food", amount, init: amount, farm: true });
       return;
     }
     const icon = kind === "hut" ? "shelter-hut" : "fire-0";
@@ -2281,13 +2283,14 @@ export class WorldScene extends Phaser.Scene {
         onComplete: () => spr.destroy(),
       });
     } else {
-      // A squash-and-stretch punch so each individual hit lands.
+      // A squash-and-stretch punch so each individual hit lands, settling a
+      // touch smaller each time so the node visibly thins out toward depletion.
+      const base = depletionScale(node.amount, node.init);
       this.tweens.add({
         targets: spr,
-        scaleX: spr.scaleX * 1.14,
-        scaleY: spr.scaleY * 0.88,
-        duration: 80,
-        yoyo: true,
+        scaleX: { from: spr.scaleX * 1.14, to: base },
+        scaleY: { from: spr.scaleY * 0.88, to: base },
+        duration: 130,
         ease: "Quad.easeOut",
       });
     }
