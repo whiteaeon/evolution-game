@@ -44,3 +44,14 @@ export const QUEST_MARKER: Record<"available" | "ready", MarkerStyle> = {
   available: { glyph: "!", color: "#ffd54a" }, // amber bang — a task on offer
   ready: { glyph: "✓", color: "#6fe07a" }, // green check — ready to turn in
 };
+
+/**
+ * Build-placement affordability marker, shown on the ghost footprint. "ok" and
+ * "blocked" differ in BOTH glyph and colour so the can-I-afford-this read never
+ * relies on red-vs-green hue alone (the most common colourblindness) — in
+ * greyscale the check and the cross still read apart.
+ */
+export const BUILD_MARKER: Record<"ok" | "blocked", MarkerStyle> = {
+  ok: { glyph: "✓", color: "#6fe07a" }, // green check — affordable, place here
+  blocked: { glyph: "✕", color: "#ff5a5a" }, // red cross — can't afford it
+};
