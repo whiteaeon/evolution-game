@@ -26,7 +26,8 @@ export function dispositionStyle(disposition: number): DispositionStyle {
 
 /**
  * Format one rival tribe as a two-line entry for the in-world Neighbours roster:
- * its disposition glyph, name, home region and biome, then its era, numbers,
+ * its disposition glyph, name, home region and biome, then its era (with how far
+ * it has crept toward the next one, unless already in the final era), numbers,
  * martial might, mood and the relations the player has built. Pure string
  * assembly — no DOM, no sim reads beyond its arguments — so the WorldScene panel
  * and these unit tests share exactly one source of truth.
@@ -36,7 +37,13 @@ export function neighbourRosterLine(
   regionName: (id: string) => string,
 ): string {
   const disp = dispositionStyle(r.disposition);
-  const era = ERAS[r.eraIndex];
+  // Surface techProgress — the rival's [0,1) creep toward its next era — so a
+  // player can read which neighbour is about to advance (and grow as a threat),
+  // not just where it sits now. Omitted in the final era, where there is no next.
+  const atFinalEra = r.eraIndex >= ERAS.length - 1;
+  const era = atFinalEra
+    ? ERAS[r.eraIndex]
+    : `${ERAS[r.eraIndex]} (→ next ${Math.round(r.techProgress * 100)}%)`;
   return (
     `${disp.icon} ${r.name} · ${regionName(r.homeRegion)} (${r.biome})\n` +
     `   ${era} · 👥 ${Math.round(r.population)} · might ${Math.round(r.strength * 100)}%` +
