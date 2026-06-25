@@ -416,6 +416,16 @@ export class WorldAudio {
     this.tone({ freq: 523, dur: 0.28, gain: 0.04, type: "sine", delay: 0.1 });
   }
 
+  /**
+   * A soft two-note "ready" ping the moment a quest's objective is met — a
+   * gentle nudge to head back to the giver. Lighter and shorter than
+   * {@link questComplete}'s three-note payoff so the two never sound alike.
+   */
+  questReady(): void {
+    this.tone({ freq: 587, dur: 0.14, gain: 0.035, type: "triangle" });
+    this.tone({ freq: 880, dur: 0.22, gain: 0.035, type: "triangle", delay: 0.09 });
+  }
+
   /** A bright little fanfare marking a quest turned in. */
   questComplete(): void {
     [523, 659, 784].forEach((f, i) => this.tone({ freq: f, dur: 0.3, gain: 0.05, type: "triangle", delay: i * 0.1 }));

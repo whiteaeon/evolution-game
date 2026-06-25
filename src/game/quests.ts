@@ -54,3 +54,13 @@ export function questMetric(
       return m.farmHarvests;
   }
 }
+
+/**
+ * The one-time banner announced the moment a quest's objective is met (the
+ * active→ready transition). Names the task and points the player back to the
+ * giver to collect — the cue that previously only surfaced passively through the
+ * tracker line and the marker glyph.
+ */
+export function questReadyBanner(desc: string, giver: string): string {
+  return `Objective met: ${desc} — return to ${giver}`;
+}
