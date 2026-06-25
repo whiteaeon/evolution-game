@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { questMetric, type QuestMetrics, type QuestSpec } from "./quests.js";
+import { questMetric, questReadyBanner, type QuestMetrics, type QuestSpec } from "./quests.js";
 
 const metrics = (over: Partial<QuestMetrics> = {}): QuestMetrics => ({
   gathered: { wood: 0, food: 0, stone: 0 },
@@ -63,5 +63,11 @@ describe("questMetric", () => {
       const progress = questMetric(s, after) - start;
       expect(progress).toBeGreaterThanOrEqual(s.target);
     }
+  });
+});
+
+describe("questReadyBanner", () => {
+  it("names the finished task and points back to the giver", () => {
+    expect(questReadyBanner("Gather 5 wood", "Ada")).toBe("Objective met: Gather 5 wood — return to Ada");
   });
 });

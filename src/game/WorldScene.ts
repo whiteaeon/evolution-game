@@ -21,7 +21,7 @@ import { gatherPulseTint } from "./gatherPulse.js";
 import { gatherFacing } from "./gatherFacing.js";
 import { gatherPromptText } from "./gatherPrompt.js";
 import { depletionScale } from "./nodeDepletion.js";
-import { questMetric, type QuestMetrics, type QuestSpec } from "./quests.js";
+import { questMetric, questReadyBanner, type QuestMetrics, type QuestSpec } from "./quests.js";
 import { buildDialogue, type DialogNode } from "./dialogue.js";
 import { buildRaidSides, resolveRaid } from "./raidDefense.js";
 import { raidPressed } from "./raidPeace.js";
@@ -2077,7 +2077,14 @@ export class WorldScene extends Phaser.Scene {
     const view = this.cameras.main.worldView;
     let tracker = "";
     for (const q of this.quests) {
-      if (q.state === "active" && progress(q) >= q.target) q.state = "ready";
+      if (q.state === "active" && progress(q) >= q.target) {
+        // Fires exactly once: the flip to "ready" below gates this branch out on
+        // every later frame, so the player gets one clear "head back" cue instead
+        // of learning only from the marker glyph and the passive tracker line.
+        q.state = "ready";
+        this.flash(questReadyBanner(q.desc, this.giverName(q.giverId)));
+        this.audio.questReady();
+      }
       const marker = this.questMarkers.get(q.giverId);
       const giver = this.npcs.find((n) => n.ind.id === q.giverId);
       // The marker rides its giver, which only moves on-screen (updateNpcs culls
