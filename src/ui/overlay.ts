@@ -20,6 +20,7 @@ import { Audio } from "./audio.js";
 import { MapView } from "./map.js";
 import { FamilyTree } from "./familytree.js";
 import { TechGraph } from "./techgraph.js";
+import { ChronicleView } from "./chronicle.js";
 import { keyboardShortcut } from "./shortcuts.js";
 import { eraSpans, traitDeltas, summaryHTML, type EraEntry } from "./summary.js";
 import { questLogHTML } from "./quests.js";
@@ -71,6 +72,7 @@ export class UIOverlay {
   private map: MapView;
   private tree: FamilyTree;
   private techGraph: TechGraph;
+  private chronicle: ChronicleView;
   private toastHost!: HTMLElement;
   /** Quest ids already announced via toast, to fire the cue exactly once. */
   private shownQuestDone = new Set<QuestId>();
@@ -84,10 +86,12 @@ export class UIOverlay {
     const mapHost = document.createElement("div");
     const treeHost = document.createElement("div");
     const graphHost = document.createElement("div");
-    document.body.append(mapHost, treeHost, graphHost);
+    const chronHost = document.createElement("div");
+    document.body.append(mapHost, treeHost, graphHost, chronHost);
     this.map = new MapView(mapHost, ctrl);
     this.tree = new FamilyTree(treeHost, ctrl);
     this.techGraph = new TechGraph(graphHost, ctrl);
+    this.chronicle = new ChronicleView(chronHost, ctrl);
     this.toastHost = document.createElement("div");
     this.toastHost.className = "toasts";
     document.body.append(this.toastHost);
@@ -158,6 +162,7 @@ export class UIOverlay {
           <button data-act="map" title="World map (M)">🗺 Map</button>
           <button data-act="family" title="Family tree (F)">🌳 Family</button>
           <button data-act="techgraph" title="Tech graph (T)">🔬 Tech</button>
+          <button data-act="chronicle" title="History book">📖 History</button>
           <button data-act="save">💾 Save</button>
           <button data-act="load">📂 Load</button>
           <button data-act="new">🔄 New</button>
@@ -323,6 +328,7 @@ export class UIOverlay {
       if (a === "map") this.map.toggle();
       if (a === "family") this.tree.toggle();
       if (a === "techgraph") this.techGraph.toggle();
+      if (a === "chronicle") this.chronicle.toggle();
       if (a === "interbreed-yes") { this.ctrl.resolveEncounter(true); this.ctrl.paused = false; }
       if (a === "interbreed-no") { this.ctrl.resolveEncounter(false); this.ctrl.paused = false; }
       if (a === "choice-0") { this.ctrl.resolveChoice(0); this.ctrl.paused = false; }
@@ -383,6 +389,7 @@ export class UIOverlay {
     if (this.map.visible) this.map.render();
     if (this.tree.visible) this.tree.render();
     if (this.techGraph.visible) this.techGraph.render();
+    if (this.chronicle.visible) this.chronicle.render();
 
     this.el.legacy.innerHTML = this.ctrl.legacy.runs
       ? `Legacy: run #${this.ctrl.legacy.runs + 1} · best ${ERAS[this.ctrl.legacy.bestEraIndex]}`

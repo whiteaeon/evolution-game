@@ -321,3 +321,24 @@ button.big { font-weight: 700; padding: 7px 14px; }
 .ins-notable { background: rgba(255, 209, 102, 0.15); color: #ffd166; border: 1px solid rgba(255, 209, 102, 0.4); border-radius: 4px; padding: 1px 5px; font-size: 10px; }
 .tree-legend { font-size: 10px; color: var(--ink-dim); display: flex; flex-wrap: wrap; gap: 8px; }
 .lg-f { color: #e08fb0; } .lg-m { color: #7fb0e0; } .lg-founder { color: #ffd166; } .lg-lin { color: #c9b3ff; }
+
+/* ── dynastic chronicle ── */
+.chron-card { max-width: 680px; width: 90vw; text-align: left; }
+.chron-card h3 { text-align: left; }
+.chron-body { max-height: 70vh; overflow-y: auto; margin: 8px 0; padding-right: 4px; }
+.chron-body h4 { margin: 4px 0; color: var(--accent); font-size: 12px; font-weight: 700; }
+.chron-figures { margin-bottom: 12px; }
+.chron-fig { font-size: 13px; line-height: 1.6; }
+.cf-name { color: var(--ink); font-weight: 600; }
+.cf-title { color: #ffd166; }
+.cf-detail { font-size: 11px; }
+.chron-h { border-top: 1px solid var(--line); padding-top: 8px; }
+.chron-entries { display: flex; flex-direction: column; gap: 8px; }
+.chron-entry { border-left: 2px solid var(--line); padding: 2px 0 2px 10px; }
+.chron-entry.ev-milestone { border-left-color: var(--good); }
+.chron-entry.ev-bounty, .chron-entry.ev-discovery { border-left-color: var(--accent); }
+.chron-entry.ev-predator, .chron-entry.ev-coldSnap, .chron-entry.ev-raid { border-left-color: var(--bad); }
+.chron-entry.ev-encounter, .chron-entry.ev-choice { border-left-color: #c9b3ff; }
+.ce-year { font-size: 11px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+.ce-prose { margin: 2px 0 0; color: var(--ink); font-size: 13px; line-height: 1.5; }
+.chron-empty { color: var(--ink-dim); font-style: italic; }
