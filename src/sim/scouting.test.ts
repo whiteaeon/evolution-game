@@ -79,14 +79,15 @@ describe("scouting — outcomes", () => {
   });
 
   it("a charted region can instead surface a small foraging find (seed 7, deterministic)", () => {
-    // seed 7 charts Deepwood as a foraging find: +12 food, no raw goods.
+    // seed 7 charts Deepwood as a foraging find: scoutEventFood (12) scaled by the
+    // season's abundance at the reveal tick → +10 food, no raw goods.
     const sim = scout(7, 4, 2);
     expect(sim.state.discoveredRegions).toContain("deepwood");
     expect(sim.state.resources.wood).toBe(0);
     expect(sim.state.resources.stone).toBe(0);
     const first = chartLogs(sim)[0];
     expect(first.type).toBe("discovery");
-    expect(first.message).toContain("foraging party returns with +12 food");
+    expect(first.message).toContain("foraging party returns with +10 food");
   });
 
   it("every reveal logs exactly one discovery event, split between caches and finds", () => {
