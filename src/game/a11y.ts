@@ -69,8 +69,8 @@ export const QUEST_MARKER: Record<"available" | "ready", MarkerStyle> = {
  * greyscale the check and the cross still read apart.
  */
 export const BUILD_MARKER: Record<"ok" | "blocked", MarkerStyle> = {
-  ok: { glyph: "✓", color: "#6fe07a" }, // green check — affordable, place here
-  blocked: { glyph: "✕", color: "#ff5a5a" }, // red cross — can't afford it
+  ok: { glyph: "✓", color: "#6fe07a" }, // green check — placeable, place here
+  blocked: { glyph: "✕", color: "#ff5a5a" }, // red cross — can't build here
 };
 
 /**
@@ -109,8 +109,8 @@ export const QUEST_MARKER_LEGEND: readonly LegendEntry[] = [
  * what a colourblind player leans on instead of the red/green hue.
  */
 export const BUILD_MARKER_LEGEND: readonly LegendEntry[] = [
-  { ...BUILD_MARKER.ok, meaning: "Build spot affordable — Enter or click to place" },
-  { ...BUILD_MARKER.blocked, meaning: "Build spot too costly — gather more first" },
+  { ...BUILD_MARKER.ok, meaning: "Build spot clear — Enter or click to place" },
+  { ...BUILD_MARKER.blocked, meaning: "Can't build here — too costly or the tile is taken" },
 ];
 
 /**

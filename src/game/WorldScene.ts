@@ -34,6 +34,7 @@ import { particleBudget } from "./particleBudget.js";
 import { footstepDust } from "./footstepDust.js";
 import { nightGlowAlpha } from "./nightGlow.js";
 import { isBlocked, removeSolid, type Solid } from "./solids.js";
+import { checkPlacement } from "./buildPlacement.js";
 import { acceptCelebrationCount, BURST_STYLE, buildSpendText, dustBurstCount, gatherBurstCount, questCelebrationCount, questRingScale, raidCelebrationCount, rallyBurstCount, studyFloatText } from "./feedback.js";
 import {
   TUTORIAL_STEPS,
@@ -161,6 +162,9 @@ const GATHER_HILITE_PULSE_MS = 900;
 /** A harvest strike leans the chieftain this far (deg) over this long (ms). */
 const GATHER_SWING_DEG = 12;
 const GATHER_SWING_MS = 260;
+/** A placed building's footprint radius, tested against collision solids so a
+ *  build can't be dropped on top of a tree, rock or another structure. */
+const BUILD_FOOTPRINT_R = 9;
 
 /** One study session at the totem: spend this much food, gain this much insight. */
 const STUDY_FOOD = 5;
@@ -1638,8 +1642,11 @@ export class WorldScene extends Phaser.Scene {
     this.ghost.setPosition(wx, wy);
     this.ghostTile.setPosition(wx, wy);
     const cost = this.buildMode.cost;
-    const ok = this.ctrl.sim.state.resources[cost.res] >= cost.amount;
-    // Green = affordable, red = not. Affordable also reads brighter/solider.
+    const affordable = this.ctrl.sim.state.resources[cost.res] >= cost.amount;
+    const overlaps = isBlocked(wx, wy, this.solids, BUILD_FOOTPRINT_R);
+    const ok = checkPlacement(affordable, overlaps, cost.res).ok;
+    // Green = placeable, red = not (too costly or the tile is taken). Affordable
+    // also reads brighter/solider.
     const col = ok ? 0x66ff66 : 0xff5a5a;
     this.ghost.setTint(col).setAlpha(ok ? 0.75 : 0.5);
     this.ghostTile.setFillStyle(col, 0.22).setStrokeStyle(1.5, col, 0.9);
@@ -1652,8 +1659,11 @@ export class WorldScene extends Phaser.Scene {
     const t = this.buildMode;
     if (!t) return;
     const res = this.ctrl.sim.state.resources;
-    if (res[t.cost.res] < t.cost.amount) {
-      this.denyBuild(`Not enough ${t.cost.res}`);
+    const affordable = res[t.cost.res] >= t.cost.amount;
+    const overlaps = isBlocked(wx, wy, this.solids, BUILD_FOOTPRINT_R);
+    const verdict = checkPlacement(affordable, overlaps, t.cost.res);
+    if (!verdict.ok) {
+      this.denyBuild(verdict.reason);
       return;
     }
     res[t.cost.res] -= t.cost.amount;
