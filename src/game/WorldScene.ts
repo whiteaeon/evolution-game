@@ -22,7 +22,7 @@ import { outbreakRisk } from "./epidemicRisk.js";
 import { isPointVisible } from "./cull.js";
 import { particleBudget } from "./particleBudget.js";
 import { removeSolid, type Solid } from "./solids.js";
-import { acceptCelebrationCount, BURST_STYLE, gatherBurstCount, questCelebrationCount, questRingScale, raidCelebrationCount, rallyBurstCount } from "./feedback.js";
+import { acceptCelebrationCount, BURST_STYLE, dustBurstCount, gatherBurstCount, questCelebrationCount, questRingScale, raidCelebrationCount, rallyBurstCount } from "./feedback.js";
 import {
   TUTORIAL_STEPS,
   advanceTutorial,
@@ -1548,7 +1548,7 @@ export class WorldScene extends Phaser.Scene {
       this.spawnBuilding("campfire", wx, wy, 0);
       this.flash("Campfire built — warmth");
     }
-    this.dustBurst(wx, wy); // a kick of dust as it lands
+    this.dustBurst(wx, wy, dustBurstCount(t.cost.amount)); // a kick of dust as it lands — fatter for a pricier build
     this.audio.build(true);
     this.positionGhost(wx, wy); // refresh the affordability tint after spending
   }
@@ -1612,9 +1612,9 @@ export class WorldScene extends Phaser.Scene {
   }
 
   /** A low, ground-hugging puff of dust where a structure lands. */
-  private dustBurst(x: number, y: number): void {
+  private dustBurst(x: number, y: number, count = 12): void {
     if (!this.onScreen(x, y)) return;
-    const n = particleBudget(this.activeParticles, 12, MAX_PARTICLES);
+    const n = particleBudget(this.activeParticles, count, MAX_PARTICLES);
     for (let i = 0; i < n; i++) {
       const a = (Math.PI * 2 * i) / n + Math.random() * 0.5;
       const dist = 14 + Math.random() * 20;

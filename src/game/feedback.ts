@@ -42,6 +42,21 @@ export function gatherBurstCount(amount: number): number {
   return Math.min(12, GATHER_BURST_BASE + bonus);
 }
 
+/** Baseline dots a building's landing dust kicks up — dustBurst's default. */
+export const DUST_BURST_BASE = 10;
+
+/**
+ * How big a dust cloud a building's landing kicks up. A pricier, heavier
+ * structure lands harder, so the puff swells a dot per few resources of its
+ * cost — a hut thuds down with a fatter kick than a cheap campfire — exactly as
+ * the gather and quest bursts swell with their magnitude. Clamped to stay
+ * tasteful and cheap (the scene's live-particle cap trims it further).
+ */
+export function dustBurstCount(cost: number): number {
+  const bonus = Math.max(0, Math.floor(cost / 5));
+  return Math.min(16, DUST_BURST_BASE + bonus);
+}
+
 /**
  * How many celebration particles a completed quest turn-in earns: the baseline
  * quest burst, swelled a little by the size of the payout so a fat reward pops
