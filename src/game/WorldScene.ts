@@ -66,6 +66,19 @@ interface Gatherable {
   amount: number;
 }
 
+/** A task a villager gives you: gather or build something for a reward. */
+interface Quest {
+  giverId: number;
+  desc: string;
+  kind: "gather" | "build";
+  res?: ResKind;
+  build?: "hut" | "farm";
+  target: number;
+  reward: { res: ResKind; amount: number };
+  state: "available" | "active" | "ready" | "done";
+  start: number; // progress-metric snapshot taken when accepted
+}
+
 /**
  * The directly-playable world: you ARE the chieftain. Walk the camp and the
  * wilds (WASD or click-to-move), the camera follows you, fog-of-war lifts as you
@@ -110,14 +123,10 @@ export class WorldScene extends Phaser.Scene {
   private npcPhase = 0;
   private npcTimer = 0;
   private objText!: Phaser.GameObjects.Text;
-  private objIndex = 0;
   private farmsBuilt = 0;
-  private readonly objectives = [
-    "Gather wood — walk to a tree and press Space",
-    "Build a Hut from the bar (15 wood)",
-    "Build a Farm for food (8 food)",
-    "Explore the land and talk to your tribe",
-  ];
+  private quests: Quest[] = [];
+  private questMarkers = new Map<number, Phaser.GameObjects.Text>();
+  private gathered: Record<ResKind, number> = { wood: 0, food: 0, stone: 0 };
 
   constructor() {
     super("world");
@@ -143,6 +152,7 @@ export class WorldScene extends Phaser.Scene {
     }
 
     this.spawnNpcs();
+    this.setupQuests();
     this.spawnPlayer();
     this.buildFog();
     this.buildHud();
@@ -470,11 +480,34 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private openDialog(ind: Individual): void {
+    const q = this.quests.find((x) => x.giverId === ind.id && x.state !== "done");
     this.dialogName.setText(individualName(ind));
-    this.dialogBody.setText(this.lineFor(ind));
+    this.dialogBody.setText(q ? this.questLine(q) : this.lineFor(ind));
     this.dialog.setVisible(true);
     this.dialogOpen = true;
     this.hoverLabel.setVisible(false);
+  }
+
+  /** Talking to a giver accepts an available quest, or turns in a finished one. */
+  private questLine(q: Quest): string {
+    if (q.state === "available") {
+      q.state = "active";
+      q.start =
+        q.kind === "gather" && q.res
+          ? this.gathered[q.res]
+          : q.build === "farm"
+            ? this.farmsBuilt
+            : this.housing;
+      this.flash(`Task accepted: ${q.desc}`);
+      return `A task for you: ${q.desc}. Come back when it's done for ${q.reward.amount} ${q.reward.res}.`;
+    }
+    if (q.state === "ready") {
+      q.state = "done";
+      this.ctrl.sim.state.resources[q.reward.res] += q.reward.amount;
+      this.flash(`Quest complete! +${q.reward.amount} ${q.reward.res}`);
+      return `Well done! Take these ${q.reward.amount} ${q.reward.res} with my thanks.`;
+    }
+    return `${q.desc} — ${Math.min(this.questProgress(q), q.target)}/${q.target}. Come back when it's done.`;
   }
 
   private closeDialog(): void {
@@ -632,7 +665,7 @@ export class WorldScene extends Phaser.Scene {
     this.movePlayer(dt);
     this.wanderNpcs(dt);
     this.updateGather();
-    this.updateObjective();
+    this.updateQuests();
     this.revealFog();
     this.syncHud();
   }
@@ -668,20 +701,71 @@ export class WorldScene extends Phaser.Scene {
     });
   }
 
-  private objectiveComplete(i: number): boolean {
-    const r = this.ctrl.sim.state.resources;
-    if (i === 0) return r.wood >= 15;
-    if (i === 1) return this.housing >= 1;
-    if (i === 2) return this.farmsBuilt >= 1;
-    return false;
+  // ── quests ───────────────────────────────────────────────────────────────
+
+  private setupQuests(): void {
+    const specs: Omit<Quest, "giverId" | "state" | "start">[] = [
+      { desc: "Gather 5 wood", kind: "gather", res: "wood", target: 5, reward: { res: "food", amount: 12 } },
+      { desc: "Build a Farm", kind: "build", build: "farm", target: 1, reward: { res: "wood", amount: 15 } },
+      { desc: "Gather 4 stone", kind: "gather", res: "stone", target: 4, reward: { res: "food", amount: 15 } },
+    ];
+    specs.forEach((s, i) => {
+      const giver = this.npcs[i * 4]; // spread the givers through the band
+      if (!giver) return;
+      this.quests.push({ ...s, giverId: giver.ind.id, state: "available", start: 0 });
+      const marker = this.add
+        .text(giver.sprite.x, giver.sprite.y, "!", {
+          fontFamily: "monospace",
+          fontSize: "16px",
+          color: "#ffe54a",
+          fontStyle: "bold",
+        })
+        .setOrigin(0.5, 1);
+      this.questMarkers.set(giver.ind.id, marker);
+    });
   }
 
-  private updateObjective(): void {
-    if (this.objIndex < this.objectives.length - 1 && this.objectiveComplete(this.objIndex)) {
-      this.objIndex++;
-      this.flash("Objective complete!");
+  private giverName(id: number): string {
+    const n = this.npcs.find((x) => x.ind.id === id);
+    return n ? individualName(n.ind) : "a villager";
+  }
+
+  /** How far along an accepted quest is, measured against its accept-time snapshot. */
+  private questProgress(q: Quest): number {
+    if (q.kind === "gather" && q.res) return this.gathered[q.res] - q.start;
+    if (q.kind === "build") return (q.build === "farm" ? this.farmsBuilt : this.housing) - q.start;
+    return 0;
+  }
+
+  private updateQuests(): void {
+    let tracker = "";
+    for (const q of this.quests) {
+      if (q.state === "active" && this.questProgress(q) >= q.target) q.state = "ready";
+      const marker = this.questMarkers.get(q.giverId);
+      const giver = this.npcs.find((n) => n.ind.id === q.giverId);
+      if (marker && giver) {
+        const sym = q.state === "available" ? "!" : q.state === "ready" ? "?" : "";
+        const bob = Math.sin(this.time.now / 250) * 2;
+        marker
+          .setText(sym)
+          .setVisible(sym !== "")
+          .setPosition(giver.sprite.x, giver.sprite.y - giver.sprite.displayHeight + bob)
+          .setDepth(giver.sprite.y + 1);
+      }
+      if (!tracker && (q.state === "active" || q.state === "ready")) {
+        const who = this.giverName(q.giverId);
+        tracker =
+          q.state === "ready"
+            ? `◆ ${q.desc} — done! return to ${who}`
+            : `◆ ${who}: ${q.desc} — ${Math.min(this.questProgress(q), q.target)}/${q.target}`;
+      }
     }
-    this.objText.setText("◆ " + this.objectives[this.objIndex]);
+    if (!tracker) {
+      tracker = this.quests.some((q) => q.state === "available")
+        ? "◆ Find a villager marked ! for a task"
+        : "◆ All tasks done — explore freely";
+    }
+    this.objText.setText(tracker);
   }
 
   private blocked(x: number, y: number): boolean {
@@ -720,6 +804,7 @@ export class WorldScene extends Phaser.Scene {
 
   private gather(node: Gatherable): void {
     this.ctrl.sim.state.resources[node.kind] += 1;
+    this.gathered[node.kind] += 1;
     node.amount -= 1;
     this.flash(`+1 ${node.kind}`);
     this.tweens.add({ targets: node.sprite, y: node.sprite.y - 3, yoyo: true, duration: 90 });
