@@ -245,7 +245,7 @@ export type EventChainId = (typeof EVENT_CHAINS)[number];
  * pending-choice mechanism with {@link EventChainId} but carry a `rivalId`, and
  * their outcomes adjust the rival's relations score (not just resources).
  */
-export const DIPLOMACY_EVENTS = ["diploGift", "diploTension", "diploRequest"] as const;
+export const DIPLOMACY_EVENTS = ["diploGift", "diploTension", "diploRequest", "diploTrade"] as const;
 export type DiplomacyId = (typeof DIPLOMACY_EVENTS)[number];
 
 export interface ChoiceOption {

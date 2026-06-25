@@ -100,6 +100,12 @@ const BALANCE = {
   diploAidCost: 7, // food sent in answer to a request for aid
   diploRelUp: 0.2, // relations gained by the generous response
   diploRelDown: 0.2, // relations lost by the self-serving response
+  // Trade: a rival this friendly offers to trade your surplus food for goods or lore.
+  diploTradeMinRelations: 0.5, // relations at/above which a friendly rival proposes a trade
+  diploTradeFoodCost: 10, // surplus food given up in a trade
+  diploTradeMaterials: 12, // materials gained trading food for goods
+  diploTradeInsight: 30, // research points gained trading food for knowledge
+  diploTradeRelUp: 0.1, // relations warmed a little by a fair trade
 };
 
 interface ShelterDef {
@@ -243,6 +249,16 @@ const DIPLOMACY_DEF: Record<
     options: [
       { label: "Send aid", hint: "spend food, relations warm" },
       { label: "Refuse", hint: "keep your stores, but relations cool" },
+    ],
+  },
+  // Only offered by a friendly rival (see maybeDiplomacy); both branches are a
+  // mutually beneficial trade, so unusually neither cools relations.
+  diploTrade: {
+    title: "A trade caravan",
+    message: (n) => `${n} sends a trade caravan, offering goods or lore for your surplus food. What will you trade for?`,
+    options: [
+      { label: "Trade for knowledge", hint: "spend food, gain a research boost" },
+      { label: "Trade for materials", hint: "spend food, gain materials you lack" },
     ],
   },
 };
@@ -925,7 +941,12 @@ export class Simulation {
     if (!this.rivalRng.chance(0.5)) return;
 
     const rival = this.rivalRng.pick(s.rivals);
-    const id = this.rivalRng.pick(DIPLOMACY_EVENTS);
+    // A trade caravan only comes from a rival the player has befriended; the other
+    // events can come from any neighbour.
+    const eligible = DIPLOMACY_EVENTS.filter(
+      (id) => id !== "diploTrade" || rival.relations >= BALANCE.diploTradeMinRelations,
+    );
+    const id = this.rivalRng.pick(eligible);
     const def = DIPLOMACY_DEF[id];
     s.pendingChoice = {
       id,
@@ -1093,6 +1114,22 @@ export class Simulation {
           s.resources.food = Math.max(0, s.resources.food - BALANCE.diploAidCost);
           if (rival) shiftRelations(rival, BALANCE.diploRelUp);
           this.logEvent("choice", `Aid is sent to ${who} through the hard season — relations warm.`);
+        }
+        break;
+      }
+      case "diploTrade": {
+        const rival = this.rivalById(c.rivalId);
+        const who = rival?.name ?? "the rival";
+        // Both branches are a fair exchange of surplus food: pay food, warm
+        // relations, and take either a research boost or materials in return.
+        s.resources.food = Math.max(0, s.resources.food - BALANCE.diploTradeFoodCost);
+        if (rival) shiftRelations(rival, BALANCE.diploTradeRelUp);
+        if (risky) {
+          s.resources.materials += BALANCE.diploTradeMaterials;
+          this.logEvent("choice", `A fair trade with ${who} brings ${BALANCE.diploTradeMaterials} materials — relations warm.`);
+        } else {
+          this.grantInsight(BALANCE.diploTradeInsight);
+          this.logEvent("choice", `Lore traded with ${who} sharpens the tribe's craft — relations warm.`);
         }
         break;
       }

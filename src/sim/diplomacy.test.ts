@@ -90,6 +90,72 @@ describe("diplomacy outcomes", () => {
     });
   });
 
+  describe("a trade caravan", () => {
+    it("trading for knowledge (option 0) spends food, boosts research and warms relations", () => {
+      const { sim, rival } = setup(7);
+      const target = sim.state.researchTarget!;
+      const before = sim.state.knowledge.progress[target];
+      offer(sim, "diploTrade", rival.id);
+      sim.resolveChoice(0);
+      expect(sim.state.resources.food).toBe(20); // 30 - 10
+      expect(sim.state.knowledge.progress[target]).toBe(before + 30);
+      expect(sim.state.resources.materials).toBe(0); // no goods on this branch
+      expect(rival.relations).toBeCloseTo(0.1, 10);
+      expect(sim.state.totals.deaths).toBe(0);
+    });
+
+    it("trading for materials (option 1) spends food, gains materials and warms relations", () => {
+      const { sim, rival } = setup(7);
+      offer(sim, "diploTrade", rival.id);
+      sim.resolveChoice(1);
+      expect(sim.state.resources.food).toBe(20); // 30 - 10
+      expect(sim.state.resources.materials).toBe(12); // +12 goods
+      expect(rival.relations).toBeCloseTo(0.1, 10);
+      expect(sim.state.totals.deaths).toBe(0);
+    });
+
+    it("spending food on a trade never drives stores negative", () => {
+      const { sim, rival } = setup(8);
+      sim.state.resources.food = 4; // less than the trade cost
+      offer(sim, "diploTrade", rival.id);
+      sim.resolveChoice(1);
+      expect(sim.state.resources.food).toBe(0);
+      expect(sim.state.resources.materials).toBe(12);
+    });
+
+    it("is never offered while no rival is friendly", () => {
+      const sim = new Simulation({ seed: 13, startingPopulation: 12 });
+      let sawTrade = false;
+      for (let i = 0; i < 2500 && sim.living.length > 0; i++) {
+        sim.autoAllocate({ gather: 4, hunt: 2, research: 3, cook: 1, build: 1 });
+        if (sim.state.pendingEncounter) sim.resolveEncounter(true);
+        const c = sim.state.pendingChoice;
+        if (c && c.id === "diploTrade") sawTrade = true;
+        // Resolve diplomacy with the cooling branch so relations never reach the
+        // friendly threshold; everything stays below diploTradeMinRelations.
+        if (sim.state.pendingChoice) sim.resolveChoice(1);
+        sim.tick();
+      }
+      expect(sim.state.rivals.every((r) => r.relations < 0.5)).toBe(true);
+      expect(sawTrade).toBe(false);
+    });
+
+    it("is offered by a friendly rival during a normal run", () => {
+      const sim = new Simulation({ seed: 3, startingPopulation: 12 });
+      for (const r of sim.state.rivals) r.relations = 1; // all neighbours befriended
+      let sawTrade = false;
+      for (let i = 0; i < 3000 && sim.living.length > 0 && !sawTrade; i++) {
+        sim.autoAllocate({ gather: 4, hunt: 2, research: 3, cook: 1, build: 1 });
+        if (sim.state.pendingEncounter) sim.resolveEncounter(true);
+        const c = sim.state.pendingChoice;
+        if (c && c.id === "diploTrade") sawTrade = true;
+        if (sim.state.pendingChoice) sim.resolveChoice(0); // warm branch keeps them friendly
+        sim.tick();
+      }
+      expect(sawTrade).toBe(true);
+    });
+  });
+
   it("relations stay clamped to [-1, 1] across repeated diplomacy", () => {
     const { sim, rival } = setup(4);
     for (let i = 0; i < 20; i++) {
