@@ -48,6 +48,7 @@ import {
 } from "../sim/index.js";
 import { dispositionStyle, neighbourRosterLine } from "../ui/diplomacy.js";
 import { settlementRosterLine } from "../ui/settlements.js";
+import { climateReadout } from "../ui/climate.js";
 import { policyOptions } from "./policyMenu.js";
 import { CONTROLS, QUEST_MARKER, BUILD_MARKER } from "./a11y.js";
 import { WorldAudio } from "../ui/audio.js";
@@ -3267,12 +3268,15 @@ export class WorldScene extends Phaser.Scene {
     const trend = this.foodTrend > 0.05 ? "▲" : this.foodTrend < -0.05 ? "▼" : "▬";
     const net = `${this.foodTrend >= 0 ? "+" : ""}${this.foodTrend.toFixed(1)}`;
     const season = ["❄ Winter", "🌱 Spring", "☀ Summer", "🍂 Autumn"][s.world.seasonIndex] ?? "";
+    // Surface the climate the sim turns under that bare season label: how cold it
+    // is pressing (exposure/hard-winter risk) and the food multiplier it applies.
+    const climate = climateReadout(s.world.cold, s.world.abundance);
     // Outbreak risk: the sim's epidemic model, surfaced so the player can act on
     // it — crowding lifts it (huts raise capacity and thin the crowd), medicine
     // lowers it. `eff` already folds in the player's housing capacity bonus.
     const risk = outbreakRisk(this.ctrl.sim.epidemicSeverity(eff));
     this.econHud.setText(
-      `Tribe ${trend} food ${net}/tick · 👥 ${pop}/${cap} · 🏠 ${this.housing} · ${season} · 🦠 ${risk.label} (${risk.pct})`,
+      `Tribe ${trend} food ${net}/tick · 👥 ${pop}/${cap} · 🏠 ${this.housing} · ${season} ${climate} · 🦠 ${risk.label} (${risk.pct})`,
     );
 
     const target = s.researchTarget;
