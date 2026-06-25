@@ -25,6 +25,7 @@ export const CONTROLS: readonly ControlHint[] = [
   { keys: "T", action: "Open the research totem" },
   { keys: "L", action: "Toggle the quest log" },
   { keys: "M", action: "Mute / unmute sound" },
+  { keys: "F5 / F9", action: "Save / load the run" },
   { keys: "Esc", action: "Close a panel or cancel building" },
   { keys: "? / H", action: "Toggle this help" },
 ];

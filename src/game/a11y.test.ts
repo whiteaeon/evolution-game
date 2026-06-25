@@ -20,6 +20,13 @@ describe("CONTROLS help listing", () => {
     expect(keys).toMatch(/\?/); // help itself
   });
 
+  it("documents keyboard save/load so the run is reachable mouse-free", () => {
+    const row = CONTROLS.find((c) => /save/i.test(c.action) && /load/i.test(c.action));
+    expect(row).toBeDefined();
+    expect(row!.keys).toMatch(/f5/i);
+    expect(row!.keys).toMatch(/f9/i);
+  });
+
   it("has no blank rows", () => {
     for (const c of CONTROLS) {
       expect(c.keys.trim().length).toBeGreaterThan(0);

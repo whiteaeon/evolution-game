@@ -538,6 +538,11 @@ export class WorldScene extends Phaser.Scene {
     this.input.keyboard!.on("keydown-H", () => this.toggleHelp());
     this.input.keyboard!.on("keydown-E", () => this.interact()); // talk to a nearby villager
     this.input.keyboard!.on("keydown-ENTER", () => this.confirm()); // place / reply / study
+    // Keyboard-only save/load: the HUD buttons are otherwise mouse-only. Capture
+    // F5/F9 so the browser's own F5-reload never fires instead of a quicksave.
+    this.input.keyboard!.addCapture("F5,F9");
+    this.input.keyboard!.on("keydown-F5", () => this.saveGame());
+    this.input.keyboard!.on("keydown-F9", () => this.loadGame());
     // Any key press is a user gesture (enables audio); "?" toggles help and the
     // number row drives the build bar / dialog replies / research rows.
     this.input.keyboard!.on("keydown", (e: KeyboardEvent) => {
