@@ -16,6 +16,7 @@ import { arrivalSpeed } from "./arrival.js";
 import { stepGather } from "./gatherCadence.js";
 import { movePingStyle } from "./movePing.js";
 import { gatherPulseTint } from "./gatherPulse.js";
+import { gatherFacing } from "./gatherFacing.js";
 import { depletionScale } from "./nodeDepletion.js";
 import { questMetric, type QuestMetrics, type QuestSpec } from "./quests.js";
 import { buildDialogue, type DialogNode } from "./dialogue.js";
@@ -138,6 +139,9 @@ const GATHER_COOLDOWN_MS = 220;
 /** Reach within which a node is gatherable, and its targeting stickiness margin. */
 const GATHER_RANGE = 34;
 const GATHER_STICK = 12; // a held node only yields to one closer by more than this
+// Deadzone (px) around dead-centre within which a node-being-harvested doesn't
+// turn the standing chieftain, so a nearly-aligned node can't flicker the facing.
+const GATHER_FACE_DEADZONE = 6;
 /** Warm tint that marks the currently-aimed node so the player sees the target. */
 const GATHER_HILITE = 0xffd27a;
 /** Brighter peak the aim highlight breathes toward, and the cycle length (ms). */
@@ -2589,6 +2593,13 @@ export class WorldScene extends Phaser.Scene {
       node.sprite.setTint(
         gatherPulseTint(this.gatherHiliteTime, GATHER_HILITE_PULSE_MS, GATHER_HILITE, GATHER_HILITE_PEAK),
       );
+      // Turn to face the node when working it in place — walking sets the flip,
+      // but standing still it would otherwise keep whatever way you last moved
+      // and swing backwards at the node. `> 3` matches movePlayer's "moving" gate.
+      if (Math.hypot(this.vx, this.vy) <= 3) {
+        const flip = gatherFacing(this.player.x, node.sprite.x, GATHER_FACE_DEADZONE);
+        if (flip !== null) this.player.setFlipX(flip);
+      }
     }
     // Hold-to-gather: a held Space aimed at a node harvests at a steady cadence,
     // so the player can sustain a swing rhythm without tapping once per hit.
