@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { CONTROLS, QUEST_MARKER, BUILD_MARKER } from "./a11y.js";
+import { CONTROLS, QUEST_MARKER, BUILD_MARKER, movementLocked } from "./a11y.js";
 
 describe("CONTROLS help listing", () => {
   it("documents every core keyboard-only action", () => {
@@ -25,6 +25,16 @@ describe("CONTROLS help listing", () => {
       expect(c.keys.trim().length).toBeGreaterThan(0);
       expect(c.action.trim().length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("movementLocked (help overlay is modal)", () => {
+  it("locks the chieftain's movement while the help overlay is open", () => {
+    expect(movementLocked(true)).toBe(true);
+  });
+
+  it("leaves movement free when the help overlay is closed", () => {
+    expect(movementLocked(false)).toBe(false);
   });
 });
 

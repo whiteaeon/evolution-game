@@ -32,6 +32,19 @@ export const CONTROLS: readonly ControlHint[] = [
   { keys: "? / H", action: "Toggle this help" },
 ];
 
+/**
+ * Is the chieftain's movement locked right now? While the controls/help overlay
+ * is open it is *modal*: the player is reading a full-screen reference card and
+ * can't see the world, so the chieftain must hold still rather than keep walking
+ * (with WASD or a queued click destination) off-screen behind the card. The other
+ * input sites — interact/confirm/digit — already gate on the same `helpOpen` flag;
+ * this gives the movement step the matching guard. Kept pure so the rule is
+ * unit-testable without a canvas.
+ */
+export function movementLocked(helpOpen: boolean): boolean {
+  return helpOpen;
+}
+
 /** A colourblind-safe marker: a distinct shape (glyph) AND colour. */
 export interface MarkerStyle {
   glyph: string;

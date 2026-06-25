@@ -51,7 +51,7 @@ import { dispositionStyle, neighbourRosterLine } from "../ui/diplomacy.js";
 import { settlementRosterLine } from "../ui/settlements.js";
 import { climateReadout } from "../ui/climate.js";
 import { policyOptions } from "./policyMenu.js";
-import { CONTROLS, QUEST_MARKER, BUILD_MARKER } from "./a11y.js";
+import { CONTROLS, QUEST_MARKER, BUILD_MARKER, movementLocked } from "./a11y.js";
 import { WorldAudio } from "../ui/audio.js";
 import type { GameController } from "./controller.js";
 
@@ -3042,6 +3042,9 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private movePlayer(dt: number): void {
+    // The help overlay is modal: while it's up the chieftain holds still instead
+    // of wandering off-screen behind the full-screen card the player is reading.
+    if (movementLocked(this.helpOpen)) return;
     const sec = dt / 1000;
     let dx = 0;
     let dy = 0;
