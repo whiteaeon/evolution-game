@@ -28,7 +28,7 @@ import { questMetric, questReadyBanner, type QuestMetrics, type QuestSpec } from
 import { questCompass } from "./questCompass.js";
 import { buildDialogue, type DialogNode } from "./dialogue.js";
 import { buildRaidSides, resolveRaid } from "./raidDefense.js";
-import { raidPressed } from "./raidPeace.js";
+import { raidPressed, raidThreatLabel } from "./raidPeace.js";
 import { outbreakRisk } from "./epidemicRisk.js";
 import { isPointVisible } from "./cull.js";
 import { npcOnScreen } from "./npcCull.js";
@@ -3050,14 +3050,18 @@ export class WorldScene extends Phaser.Scene {
     this.updateRivalLabel();
   }
 
-  /** Redraw the neighbour camp's banner: name, disposition (their mood) and the
-   *  player-built relations the gift action moves. */
+  /** Redraw the neighbour camp's banner: name, disposition (their mood), the
+   *  player-built relations the gift action moves, and whether those relations
+   *  have reached the friendly band that stays a raid (see {@link raidThreatLabel}). */
   private updateRivalLabel(): void {
     const r = this.rival;
     if (!r || !this.rivalLabel) return;
     const d = dispositionStyle(r.disposition);
     this.rivalLabel
-      .setText(`${r.name} · ${rivalRegion(r).name}\n${d.icon} ${d.label}  ·  relations ${r.relations.toFixed(2)}`)
+      .setText(
+        `${r.name} · ${rivalRegion(r).name}\n` +
+          `${d.icon} ${d.label}  ·  relations ${r.relations.toFixed(2)}  ·  ${raidThreatLabel(r.relations)}`,
+      )
       .setColor(d.color);
   }
 
