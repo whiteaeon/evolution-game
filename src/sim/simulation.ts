@@ -668,7 +668,10 @@ export class Simulation {
     const adults = this.living.filter(
       (i) => i.age >= this.config.reproMinAge - 4 && i.health > 0.15,
     );
-    const pool = [...adults].sort((a, b) => a.id - b.id);
+    // `living` is in insertion order and individuals are only ever appended with a
+    // strictly increasing id, so this filtered list is already sorted by id — no
+    // per-tick copy + sort needed. (Invariant guarded by simulation.test.ts.)
+    const pool = adults;
     const out = Object.fromEntries(TASKS.map((t) => [t, [] as Individual[]])) as Record<
       Task,
       Individual[]
@@ -1129,7 +1132,9 @@ export class Simulation {
     const adults = alive.filter(
       (i) => i.age >= this.config.reproMinAge - 4 && i.health > 0.15,
     );
-    const pool = [...adults].sort((a, b) => a.id - b.id);
+    // Same id-order invariant as distributeWorkers: a settlement's members are only
+    // ever appended with increasing ids, so the filtered adults are already id-sorted.
+    const pool = adults;
     const out = Object.fromEntries(TASKS.map((t) => [t, [] as Individual[]])) as Record<
       Task,
       Individual[]
