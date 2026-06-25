@@ -663,6 +663,24 @@ export class Simulation {
     e.foodMult *= b.foodMult;
   }
 
+  /**
+   * The effects bundle the directly-played world (WorldScene) runs under: the tech
+   * tree plus the belief track, the standing policies and the leader's bonus, with
+   * the carrying capacity the player's huts add folded in. This is the exact bundle
+   * {@link economyTick} and {@link rollEpidemic} apply, exposed so the scene's HUD
+   * can read the true population ceiling and outbreak risk the player's choices —
+   * adopting a policy, deepening belief, building huts — actually produce, instead
+   * of a tech-only estimate that ignores them. Pure query: fresh bundle, no mutation.
+   */
+  playedEffects(housingBonus = 0): Required<TechEffects> {
+    const effects = this.state.knowledge.aggregateEffects();
+    this.state.culture.foldInto(effects);
+    this.state.policies.foldInto(effects);
+    this.applyLeaderBonus(effects);
+    effects.capacityBonus += Math.max(0, housingBonus);
+    return effects;
+  }
+
   // ── main loop ──────────────────────────────────────────────────────────────
 
   tick(): void {
@@ -732,13 +750,9 @@ export class Simulation {
     const s = this.state;
     if (this.living.length === 0) return;
     s.tick++;
-    const effects = s.knowledge.aggregateEffects();
-    s.culture.foldInto(effects);
-    s.policies.foldInto(effects);
-    this.applyLeaderBonus(effects);
     // Player-built huts add carrying capacity (and, via the soft cap below, a
     // little more food storage): more shelter, more people the land can hold.
-    effects.capacityBonus += Math.max(0, housingBonus);
+    const effects = this.playedEffects(housingBonus);
     updateWorld(this.state, this.config, effects);
     this.consumeAndUpdateNeeds(effects);
     this.ageAndDie(effects);
@@ -990,14 +1004,9 @@ export class Simulation {
    * cannot perturb the balance or replay of `npm run sim`.
    */
   rollEpidemic(housingBonus = 0): number {
-    const s = this.state;
     if (this.living.length < BALANCE.epidemicMinPop) return 0;
     if (!this.epidemicRng.chance(BALANCE.epidemicChance)) return 0;
-    const effects = s.knowledge.aggregateEffects();
-    s.culture.foldInto(effects);
-    s.policies.foldInto(effects);
-    this.applyLeaderBonus(effects);
-    effects.capacityBonus += Math.max(0, housingBonus);
+    const effects = this.playedEffects(housingBonus);
     const deaths = this.triggerEpidemic(effects);
     this.logEvent(
       "disease",

@@ -3561,9 +3561,11 @@ export class WorldScene extends Phaser.Scene {
     );
 
     // Survival readout: which way the larder is trending, the tribe against the
-    // ceiling the player's huts raise, and the season pressing on both.
-    const eff = s.knowledge.aggregateEffects();
-    eff.capacityBonus += this.housingCapacity();
+    // ceiling the player's huts raise, and the season pressing on both. Use the
+    // same effects bundle the played economy runs under (tech + belief + policies
+    // + leader + huts), so adopting a policy or deepening belief visibly shifts the
+    // population ceiling and outbreak risk the player reads here.
+    const eff = this.ctrl.sim.playedEffects(this.housingCapacity());
     const cap = Math.round(this.ctrl.sim.carryingCapacity(eff));
     const pop = this.ctrl.sim.living.length;
     const trend = this.foodTrend > 0.05 ? "▲" : this.foodTrend < -0.05 ? "▼" : "▬";
