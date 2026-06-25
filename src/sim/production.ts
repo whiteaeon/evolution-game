@@ -1,4 +1,4 @@
-import { TECH_TREE, TECH_ORDER } from "./knowledge.js";
+import { TECH_TREE } from "./knowledge.js";
 import { BALANCE } from "./balance.js";
 import type { SimEngine } from "./engine.js";
 import type { SimEventType, TechEffects, TechId } from "./types.js";
@@ -89,8 +89,11 @@ export function doResearch(eng: SimEngine, e: Required<TechEffects>): void {
 }
 
 export function pickResearchTarget(state: SimState): TechId | null {
+  // available() already returns the unlocked techs filtered from TECH_ORDER, so
+  // it preserves that canonical ordering — its first element IS the earliest
+  // researchable tech. (The same `available()[0]` pick is used elsewhere, e.g.
+  // the initial researchTarget and the event-driven fallback.) Returning it
+  // directly avoids an O(n²) rescan (a linear `includes` inside a TECH_ORDER loop).
   const avail = state.knowledge.available();
-  if (avail.length === 0) return null;
-  for (const t of TECH_ORDER) if (avail.includes(t)) return t;
-  return avail[0];
+  return avail[0] ?? null;
 }
