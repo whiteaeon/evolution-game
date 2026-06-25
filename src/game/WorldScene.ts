@@ -19,6 +19,7 @@ import { gatherApproach } from "./gatherApproach.js";
 import { movePingStyle } from "./movePing.js";
 import { gatherPulseTint } from "./gatherPulse.js";
 import { gatherFacing } from "./gatherFacing.js";
+import { gatherPromptText } from "./gatherPrompt.js";
 import { depletionScale } from "./nodeDepletion.js";
 import { questMetric, type QuestMetrics, type QuestSpec } from "./quests.js";
 import { buildDialogue, type DialogNode } from "./dialogue.js";
@@ -2684,7 +2685,7 @@ export class WorldScene extends Phaser.Scene {
     const cam = this.cameras.main;
     const ready = this.gatherCooldown <= 0;
     this.gatherPrompt
-      .setText(ready ? `Hold Space: gather ${node.kind}` : "…")
+      .setText(gatherPromptText(node.kind, ready, node.amount))
       .setAlpha(ready ? 1 : 0.6)
       .setPosition(node.sprite.x - cam.scrollX, node.sprite.y - cam.scrollY - node.sprite.displayHeight)
       .setVisible(true);
