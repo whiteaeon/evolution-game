@@ -149,10 +149,10 @@ export class UIOverlay {
         <h1>Dawn of the Tribe</h1>
         <div class="era" data-el="era">Paleolithic</div>
         <div class="hdr-stats">
-          <span>Year <b data-el="year">0</b></span>
-          <span>Gen <b data-el="gen">0</b></span>
-          <span>Pop <b data-el="pop">0</b></span>
-          <span data-el="season">❄ Winter</span>
+          <span title="Years elapsed since the dawn of your tribe">📅 Year <b data-el="year">0</b></span>
+          <span title="Generations born into your lineage">🧬 Gen <b data-el="gen">0</b></span>
+          <span title="People currently alive in your tribe">👥 Pop <b data-el="pop">0</b></span>
+          <span data-el="season" title="The season — shapes food, cold, and growth">❄ Winter</span>
         </div>
         <div class="goal hidden" data-el="goal">
           <span class="goal-label">Next objective</span>
