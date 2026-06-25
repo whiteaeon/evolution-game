@@ -110,3 +110,54 @@ describe("epidemic mortality selects hard on diseaseResistance", () => {
     expect(sim.living.length).toBeGreaterThanOrEqual(before - 2);
   });
 });
+
+describe("rollEpidemic surfaces the outbreak into the directly-played world", () => {
+  it("respects the population gate — a small, recovering tribe is never struck", () => {
+    const sim = new Simulation({ seed: 1, startingPopulation: 5, carryingCapacityBase: 30 });
+    // Below BALANCE.epidemicMinPop (6): every roll is a guaranteed no-op.
+    for (let i = 0; i < 50; i++) expect(sim.rollEpidemic()).toBe(0);
+    expect(sim.living.length).toBe(5);
+  });
+
+  it("fires the same gated outbreak as the headless tick, killing exactly its return count", () => {
+    // Pool across seeds: the chance gate means some rolls pass and bite.
+    let outbreaks = 0;
+    let totalDeaths = 0;
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      const sim = new Simulation({ seed, startingPopulation: 40, carryingCapacityBase: 40, startRegion: "twin-rivers" });
+      sim.state.era = "Iron Age"; // severe, pre-medicine
+      const before = sim.living.length;
+      const deaths = sim.rollEpidemic();
+      expect(before - sim.living.length).toBe(deaths); // pop drops by exactly the toll
+      expect(sim.living.length).toBeGreaterThan(0); // bounded — never a wipe
+      if (deaths > 0) {
+        outbreaks++;
+        totalDeaths += deaths;
+      }
+    }
+    expect(outbreaks).toBeGreaterThan(0); // the outbreak actually fires in the played world
+    expect(totalDeaths).toBeGreaterThan(0);
+  });
+
+  it("the player's housing softens the same outbreak (the in-world lever works)", () => {
+    // Two copies share the seed and the epidemicRng stream, so the chance gate and
+    // the per-person mortality draws line up. The only difference is the player's
+    // housing bonus, which thins crowding and so lowers severity → a subset of the
+    // same deaths. Deterministic ≤, not a probabilistic comparison.
+    const make = (seed: number) => {
+      const s = new Simulation({ seed, startingPopulation: 40, carryingCapacityBase: 24, startRegion: "twin-rivers" });
+      s.state.era = "Iron Age";
+      return s;
+    };
+    // Find the first seed whose gate passes and bites, so the comparison is real.
+    let seed = 1;
+    let crowdedDeaths = 0;
+    for (; seed < 30; seed++) {
+      crowdedDeaths = make(seed).rollEpidemic(0);
+      if (crowdedDeaths > 0) break;
+    }
+    const housedDeaths = make(seed).rollEpidemic(48); // many huts thin the crowd
+    expect(crowdedDeaths).toBeGreaterThan(0); // the outbreak fires for this seed
+    expect(housedDeaths).toBeLessThanOrEqual(crowdedDeaths); // and housing softens it
+  });
+});
