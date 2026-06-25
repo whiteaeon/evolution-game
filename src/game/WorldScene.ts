@@ -11,6 +11,13 @@ import {
 import { HOMININ_WALK, homininFrameKey } from "./homininWalk.js";
 import { chooseNpcActivity, type NpcActivity } from "./npcActivity.js";
 import {
+  TUTORIAL_STEPS,
+  advanceTutorial,
+  tutorialSeen,
+  markTutorialSeen,
+  type TutorialEvent,
+} from "./tutorial.js";
+import {
   ERAS,
   individualName,
   notableById,
@@ -183,6 +190,10 @@ export class WorldScene extends Phaser.Scene {
   private questMarkers = new Map<number, Phaser.GameObjects.Text>();
   private gathered: Record<ResKind, number> = { wood: 0, food: 0, stone: 0 };
 
+  private tutorialStep = -1; // -1 = inactive (already seen, or finished/skipped)
+  private tutorialCard: Phaser.GameObjects.Container | null = null;
+  private tutorialText!: Phaser.GameObjects.Text;
+
   constructor() {
     super("world");
   }
@@ -244,6 +255,10 @@ export class WorldScene extends Phaser.Scene {
     this.input.on(
       "pointerdown",
       (pointer: Phaser.Input.Pointer, currentlyOver: Phaser.GameObjects.GameObject[]) => {
+        if (currentlyOver.some((o) => o.getData("tutorialSkip"))) {
+          this.endTutorial(false);
+          return;
+        }
         if (this.dialogOpen) {
           this.closeDialog();
           return;
@@ -269,6 +284,9 @@ export class WorldScene extends Phaser.Scene {
     );
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => this.updateGhost(p));
     this.input.keyboard!.on("keydown-ESC", () => this.cancelBuild());
+
+    // First run only: teach the core loop with a dismissible staged overlay.
+    if (!tutorialSeen()) this.startTutorial();
   }
 
   private key(name: string): Phaser.Input.Keyboard.Key {
@@ -580,6 +598,7 @@ export class WorldScene extends Phaser.Scene {
             ? this.farmsBuilt
             : this.housing;
       this.flash(`Task accepted: ${q.desc}`);
+      this.tutorialEvent("quest");
       return `A task for you: ${q.desc}. Come back when it's done for ${q.reward.amount} ${q.reward.res}.`;
     }
     if (q.state === "ready") {
@@ -720,6 +739,7 @@ export class WorldScene extends Phaser.Scene {
         this.solids.push({ x: wx, y: wy, r: 10 });
         this.addNightGlow(wx, wy - 6, 30, 22, 0xffd27a, 0.45, false); // a lit window after dark
         this.flash("Hut built — +1 housing");
+        this.tutorialEvent("build");
       } else {
         this.addNightGlow(wx, wy, 72, 42, 0xffb066, 0.5, true); // campfire's warm glow, lit at night
         this.campfires.push({ x: wx, y: wy }); // villagers will gather here after dark
@@ -834,6 +854,76 @@ export class WorldScene extends Phaser.Scene {
       ease: "Sine.easeOut",
       onComplete: () => txt.destroy(),
     });
+  }
+
+  // ── tutorial ─────────────────────────────────────────────────────────────
+
+  /** Build the dismissible staged overlay and arm the first step. */
+  private startTutorial(): void {
+    const w = 452;
+    const h = 56;
+    const panel = this.add.rectangle(0, 0, w, h, 0x141c12, 0.94).setStrokeStyle(2, 0xffe08a);
+    this.tutorialText = this.add
+      .text(-w / 2 + 12, -h / 2 + 9, "", {
+        fontFamily: "monospace",
+        fontSize: "11px",
+        color: "#fff4d6",
+        wordWrap: { width: w - 84 },
+        lineSpacing: 3,
+      })
+      .setOrigin(0, 0);
+    const skip = this.add
+      .text(w / 2 - 12, 0, "Skip ▸", {
+        fontFamily: "monospace",
+        fontSize: "11px",
+        color: "#9fb08a",
+        backgroundColor: "#00000066",
+        padding: { x: 6, y: 4 },
+      })
+      .setOrigin(1, 0.5)
+      .setInteractive({ useHandCursor: true });
+    skip.setData("tutorialSkip", true);
+    this.tutorialCard = this.add
+      .container(VIEW_W / 2, 78, [panel, this.tutorialText, skip])
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH + 10); // above the dialog so Skip is always reachable
+    this.tutorialStep = 0;
+    this.renderTutorial();
+  }
+
+  /** Show the current step's number and instruction. */
+  private renderTutorial(): void {
+    const s = TUTORIAL_STEPS[this.tutorialStep];
+    if (!s) return;
+    this.tutorialText.setText(`Step ${this.tutorialStep + 1}/${TUTORIAL_STEPS.length}\n${s.text}`);
+  }
+
+  /** A player action; clears the current step if it's the one we're waiting on. */
+  private tutorialEvent(event: TutorialEvent): void {
+    if (this.tutorialStep < 0) return;
+    const next = advanceTutorial(this.tutorialStep, event);
+    if (next === this.tutorialStep) return;
+    this.tutorialStep = next;
+    if (next >= TUTORIAL_STEPS.length) this.endTutorial(true);
+    else this.renderTutorial();
+  }
+
+  /** Finish (or skip) the tutorial: persist 'seen' and fade the card away. */
+  private endTutorial(completed: boolean): void {
+    if (this.tutorialStep < 0) return;
+    this.tutorialStep = -1;
+    markTutorialSeen();
+    if (completed) this.flash("Tutorial complete — explore freely!");
+    const card = this.tutorialCard;
+    if (card) {
+      this.tutorialCard = null;
+      this.tweens.add({
+        targets: card,
+        alpha: 0,
+        duration: 300,
+        onComplete: () => card.destroy(),
+      });
+    }
   }
 
   // ── per-frame ──────────────────────────────────────────────────────────────
@@ -1057,6 +1147,7 @@ export class WorldScene extends Phaser.Scene {
     this.gathered[node.kind] += 1;
     node.amount -= 1;
     this.gatherCooldown = GATHER_COOLDOWN_MS;
+    this.tutorialEvent("gather");
 
     const spr = node.sprite;
     const px = spr.x;
@@ -1200,6 +1291,7 @@ export class WorldScene extends Phaser.Scene {
     const speed = Math.hypot(this.vx, this.vy);
     const moving = speed > 3; // ignore the velocity tail once we've nearly stopped
     if (moving) {
+      this.tutorialEvent("move");
       const step = speed * sec;
       const ux = this.vx / speed;
       const uy = this.vy / speed;
