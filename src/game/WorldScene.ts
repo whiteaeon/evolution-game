@@ -5,6 +5,7 @@ import {
   makeDecorTextures,
   makeShelterTextures,
   makeFireTextures,
+  makeTotemTexture,
   ensureHomininTexture,
   type MorphParams,
 } from "./textures.js";
@@ -21,10 +22,12 @@ import {
 } from "./tutorial.js";
 import {
   ERAS,
+  TECH_TREE,
   individualName,
   notableById,
   type Biome,
   type Individual,
+  type TechId,
 } from "../sim/index.js";
 import type { GameController } from "./controller.js";
 
@@ -57,6 +60,10 @@ const DIALOG_X = VIEW_W / 2;
 const DIALOG_Y = VIEW_H - 90;
 const UI_DEPTH = 100000;
 
+// Research (tech) panel geometry, shared by its frame and the row/button layout.
+const TECH_W = 452;
+const TECH_H = 236;
+
 /** One full dawn→day→dusk→night→dawn loop, in render time (sim stays paused). */
 const DAY_LENGTH_MS = 90_000;
 /**
@@ -83,6 +90,10 @@ type ResKind = "wood" | "food" | "stone";
 
 /** Minimum gap between harvests, so holding/spamming Space reads as crisp hits. */
 const GATHER_COOLDOWN_MS = 220;
+
+/** One study session at the totem: spend this much food, gain this much insight. */
+const STUDY_FOOD = 5;
+const STUDY_POINTS = 30;
 /** Particle tint per resource — woody brown, leafy green, cool grey stone. */
 const RES_COLOR: Record<ResKind, number> = { wood: 0xb5793b, food: 0x6fcf57, stone: 0xc2c6cf };
 /** Floating-gain text colour per resource (a brighter sibling of the particle). */
@@ -215,6 +226,16 @@ export class WorldScene extends Phaser.Scene {
   private tutorialCard: Phaser.GameObjects.Container | null = null;
   private tutorialText!: Phaser.GameObjects.Text;
 
+  // Research: a lore-totem at camp opens a compact tech panel onto the sim's
+  // existing knowledge tree; the chieftain directs and funds the next discovery.
+  private techPanel!: Phaser.GameObjects.Container;
+  private techPanelBody!: Phaser.GameObjects.Text;
+  private techPanelOpen = false;
+  private techRows: Phaser.GameObjects.Text[] = []; // live, clickable available-tech rows
+  private studyBtn!: Phaser.GameObjects.Text;
+  private researchHud!: Phaser.GameObjects.Text;
+  private campFireLit = false; // camp hearth shown once 'fire' is known
+
   constructor() {
     super("world");
   }
@@ -227,6 +248,7 @@ export class WorldScene extends Phaser.Scene {
     makeDecorTextures(this);
     makeShelterTextures(this);
     makeFireTextures(this);
+    makeTotemTexture(this);
 
     this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
     this.cameras.main.setBackgroundColor("#1d2a17");
@@ -234,21 +256,19 @@ export class WorldScene extends Phaser.Scene {
     this.paintGround(biome);
     this.buildTerrain(biome);
     this.add.image(CAMP.x, CAMP.y - 6, "shelter-cave").setDepth(CAMP.y);
-    if (this.ctrl.sim.state.knowledge.has("fire")) {
-      this.add.image(CAMP.x + 2, CAMP.y + 30, "fire-0").setDepth(CAMP.y + 30);
-      this.addNightGlow(CAMP.x + 2, CAMP.y + 34, 84, 48, 0xffb066, 0.5, true);
-      this.campfires.push({ x: CAMP.x + 2, y: CAMP.y + 30 });
-    }
+    if (this.ctrl.sim.state.knowledge.has("fire")) this.lightCampfire();
 
     this.spawnNpcs();
     this.setupQuests();
     this.spawnPlayer();
+    this.placeTotem();
     this.buildFog();
     this.buildHud();
     this.buildDayNight();
     this.buildDialog();
     this.buildBuildBar();
     this.buildQuestLog();
+    this.buildTechPanel();
     // A grid-snapped footprint sits under the ghost so the placement cell — and
     // whether it is affordable (green) or not (red) — is unmistakable.
     this.ghostTile = this.add
@@ -287,6 +307,20 @@ export class WorldScene extends Phaser.Scene {
           else this.closeDialog(); // a click anywhere else leaves the conversation
           return;
         }
+        if (this.techPanelOpen) {
+          if (currentlyOver.some((o) => o.getData("studyBtn"))) {
+            this.study();
+          } else {
+            const row = currentlyOver.find((o) => o.getData("techId") !== undefined);
+            if (row) this.chooseTech(row.getData("techId") as TechId);
+            else this.closeTechPanel(); // a click off the rows/button leaves the panel
+          }
+          return;
+        }
+        if (currentlyOver.some((o) => o.getData("totem"))) {
+          this.openTechPanel();
+          return;
+        }
         const btn = currentlyOver.find((o) => o.getData("buildBtn") !== undefined);
         if (btn) {
           this.toggleBuild(btn.getData("buildBtn") as string);
@@ -307,8 +341,12 @@ export class WorldScene extends Phaser.Scene {
       },
     );
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => this.updateGhost(p));
-    this.input.keyboard!.on("keydown-ESC", () => this.cancelBuild());
+    this.input.keyboard!.on("keydown-ESC", () => {
+      if (this.techPanelOpen) this.closeTechPanel();
+      else this.cancelBuild();
+    });
     this.input.keyboard!.on("keydown-L", () => this.toggleQuestLog());
+    this.input.keyboard!.on("keydown-T", () => this.toggleTechPanel());
 
     // First run only: teach the core loop with a dismissible staged overlay.
     if (!tutorialSeen()) this.startTutorial();
@@ -508,6 +546,17 @@ export class WorldScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(UI_DEPTH);
 
+    this.researchHud = this.add
+      .text(10, 52, "", {
+        fontFamily: "monospace",
+        fontSize: "12px",
+        color: "#bfe0ff",
+        backgroundColor: "#00000066",
+        padding: { x: 6, y: 3 },
+      })
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH);
+
     this.gatherPrompt = this.add
       .text(0, 0, "", {
         fontFamily: "monospace",
@@ -522,7 +571,7 @@ export class WorldScene extends Phaser.Scene {
       .setVisible(false);
 
     this.add
-      .text(VIEW_W / 2, 28, "WASD/click move · click a villager · Space to gather · build from the bar · L: quests", {
+      .text(VIEW_W / 2, 28, "WASD/click move · click a villager · Space gather · build bar · L quests · T research", {
         fontFamily: "monospace",
         fontSize: "10px",
         color: "#cfe0d0",
@@ -1231,6 +1280,206 @@ export class WorldScene extends Phaser.Scene {
     panel.height = this.questLogText.height + 38; // wrap the title + list
   }
 
+  // ── research (the lore-totem) ────────────────────────────────────────────────
+
+  /** Light the camp hearth: the fire sprite, its night glow, and a gather hub. */
+  private lightCampfire(): void {
+    if (this.campFireLit) return;
+    this.campFireLit = true;
+    this.add.image(CAMP.x + 2, CAMP.y + 30, "fire-0").setDepth(CAMP.y + 30);
+    this.addNightGlow(CAMP.x + 2, CAMP.y + 34, 84, 48, 0xffb066, 0.5, true);
+    this.campfires.push({ x: CAMP.x + 2, y: CAMP.y + 30 });
+  }
+
+  /** A clickable lore-totem just off camp — the in-world handle for research. */
+  private placeTotem(): void {
+    const x = CAMP.x - 70;
+    const y = CAMP.y + 48;
+    const totem = this.add
+      .image(x, y, "totem")
+      .setOrigin(0.5, 1)
+      .setDepth(y)
+      .setInteractive({ useHandCursor: true });
+    totem.setData("totem", true);
+    this.solids.push({ x, y: y - 8, r: 9 });
+    this.add
+      .text(x, y - 34, "✦ Totem", {
+        fontFamily: "monospace",
+        fontSize: "10px",
+        color: "#bfe0ff",
+        backgroundColor: "#00000066",
+        padding: { x: 3, y: 1 },
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(y + 1);
+  }
+
+  private buildTechPanel(): void {
+    // The static frame lives in a container; the interactive rows and Study
+    // button are scene-level and rebuilt/destroyed per open (like dialog choices),
+    // so nothing stays hit-testable once the panel is closed.
+    const w = TECH_W;
+    const h = TECH_H;
+    const panel = this.add.rectangle(0, 0, w, h, 0x101820, 0.95).setStrokeStyle(2, 0x5f86a8);
+    const title = this.add
+      .text(-w / 2 + 14, -h / 2 + 9, "Research — the Totem (T)", {
+        fontFamily: "monospace",
+        fontSize: "14px",
+        color: "#bfe0ff",
+        fontStyle: "bold",
+      })
+      .setOrigin(0, 0);
+    this.techPanelBody = this.add
+      .text(-w / 2 + 14, -h / 2 + 30, "", {
+        fontFamily: "monospace",
+        fontSize: "11px",
+        color: "#e9e0c8",
+        wordWrap: { width: w - 28 },
+        lineSpacing: 3,
+      })
+      .setOrigin(0, 0);
+    const hint = this.add
+      .text(w / 2 - 12, h / 2 - 10, "click a tech to choose · Esc to close", {
+        fontFamily: "monospace",
+        fontSize: "10px",
+        color: "#7f93a6",
+      })
+      .setOrigin(1, 1);
+    this.techPanel = this.add
+      .container(VIEW_W / 2, VIEW_H / 2 - 4, [panel, title, this.techPanelBody, hint])
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH + 1)
+      .setVisible(false);
+  }
+
+  private toggleTechPanel(): void {
+    if (this.techPanelOpen) this.closeTechPanel();
+    else this.openTechPanel();
+  }
+
+  private openTechPanel(): void {
+    if (this.dialogOpen) this.closeDialog();
+    this.cancelBuild();
+    this.techPanelOpen = true;
+    this.techPanel.setVisible(true);
+    this.refreshTechPanel();
+  }
+
+  private closeTechPanel(): void {
+    this.techPanelOpen = false;
+    this.techPanel.setVisible(false);
+    this.techRows.forEach((r) => r.destroy());
+    this.techRows = [];
+  }
+
+  /** Redraw the panel from the sim's live knowledge tree (header + tech rows). */
+  private refreshTechPanel(): void {
+    const sim = this.ctrl.sim;
+    const k = sim.state.knowledge;
+    const target = sim.state.researchTarget;
+    let head = `Era: ${k.currentEra()}    Known: ${k.discovered.size}/${Object.keys(TECH_TREE).length}\n`;
+    if (target && TECH_TREE[target]) {
+      const def = TECH_TREE[target];
+      const prog = Math.min(Math.floor(k.progress[target]), def.cost);
+      head += `▸ ${def.name}  ${prog}/${def.cost}\n${def.blurb}`;
+    } else {
+      head += "▸ choose a tech below to direct the tribe's research";
+    }
+    this.techPanelBody.setText(head);
+
+    this.techRows.forEach((r) => r.destroy());
+    this.techRows = [];
+    const left = VIEW_W / 2 - TECH_W / 2 + 18;
+    const top = VIEW_H / 2 - 4 - TECH_H / 2 + 98;
+    const avail = k.available();
+    avail.slice(0, 6).forEach((id, i) => {
+      const def = TECH_TREE[id];
+      const sel = id === target;
+      const row = this.add
+        .text(left, top + i * 16, `${sel ? "●" : "○"} ${def.name}  (${def.cost} · ${def.era})`, {
+          fontFamily: "monospace",
+          fontSize: "11px",
+          color: sel ? "#ffe08a" : "#cfe0a8",
+        })
+        .setOrigin(0, 0)
+        .setScrollFactor(0)
+        .setDepth(UI_DEPTH + 2)
+        .setInteractive({ useHandCursor: true });
+      row.setData("techId", id);
+      row.on("pointerover", () => row.setColor("#ffffff"));
+      row.on("pointerout", () => row.setColor(sel ? "#ffe08a" : "#cfe0a8"));
+      this.techRows.push(row);
+    });
+    if (avail.length === 0) {
+      this.techRows.push(
+        this.add
+          .text(left, top, "The whole tech tree is discovered — the journey is complete.", {
+            fontFamily: "monospace",
+            fontSize: "11px",
+            color: "#9fb08a",
+            wordWrap: { width: TECH_W - 36 },
+          })
+          .setOrigin(0, 0)
+          .setScrollFactor(0)
+          .setDepth(UI_DEPTH + 2),
+      );
+    }
+
+    // The Study button is scene-level and rebuilt here, so it is gone when closed.
+    const canStudy = !!target && Math.floor(sim.state.resources.food) >= STUDY_FOOD;
+    this.studyBtn = this.add
+      .text(
+        left,
+        VIEW_H / 2 - 4 + TECH_H / 2 - 26,
+        target ? `Study  (−${STUDY_FOOD} food → +${STUDY_POINTS} insight)` : "Study  (choose a tech first)",
+        {
+          fontFamily: "monospace",
+          fontSize: "12px",
+          color: canStudy ? "#cfe0a8" : "#8a9477",
+          backgroundColor: canStudy ? "#1d3320" : "#23291c",
+          padding: { x: 6, y: 3 },
+        },
+      )
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH + 2)
+      .setInteractive({ useHandCursor: true });
+    this.studyBtn.setData("studyBtn", true);
+    this.techRows.push(this.studyBtn);
+  }
+
+  /** Pick the tech to research next (surfaces straight to the pure sim). */
+  private chooseTech(id: TechId): void {
+    this.ctrl.sim.setResearchTarget(id);
+    this.refreshTechPanel();
+  }
+
+  /** Spend food to pour insight into the current target; reflect any discovery. */
+  private study(): void {
+    const sim = this.ctrl.sim;
+    if (!sim.state.researchTarget) {
+      this.flash("Pick a tech to research first");
+      return;
+    }
+    if (Math.floor(sim.state.resources.food) < STUDY_FOOD) {
+      this.flash(`Need ${STUDY_FOOD} food to study`);
+      this.buildSfx(false);
+      return;
+    }
+    sim.state.resources.food -= STUDY_FOOD;
+    const completed = sim.fundResearch(STUDY_POINTS);
+    this.buildSfx(true);
+    if (completed) this.onTechDiscovered(completed);
+    this.refreshTechPanel();
+  }
+
+  /** A freshly-researched tech: announce it and reflect its effect in the world. */
+  private onTechDiscovered(id: TechId): void {
+    const def = TECH_TREE[id];
+    this.flash(def.unlocksEra ? `${def.name} — the ${def.unlocksEra} begins!` : `Discovered ${def.name}!`);
+    if (id === "fire") this.lightCampfire(); // the hearth is lit the moment fire is known
+  }
+
   private blocked(x: number, y: number): boolean {
     const r = 7; // player half-width at the feet
     return this.solids.some((s) => Phaser.Math.Distance.Between(x, y, s.x, s.y) < s.r + r);
@@ -1269,17 +1518,21 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private gather(node: Gatherable): void {
-    this.ctrl.sim.state.resources[node.kind] += 1;
-    this.gathered[node.kind] += 1;
-    if (node.farm) this.farmHarvests += 1; // food taken from a farm the player placed
-    node.amount -= 1;
+    // Better tools mean more per swing: the harvest scales with the tribe's
+    // researched gather multiplier (Stone Tools, Wild-Plant Gathering, the Wheel…).
+    const mult = this.ctrl.sim.state.knowledge.aggregateEffects().gatherMult;
+    const amt = Math.max(1, Math.round(mult));
+    this.ctrl.sim.state.resources[node.kind] += amt;
+    this.gathered[node.kind] += amt;
+    if (node.farm) this.farmHarvests += amt; // food taken from a farm the player placed
+    node.amount -= 1; // one swing depletes the node by one regardless of yield
     this.gatherCooldown = GATHER_COOLDOWN_MS;
     this.tutorialEvent("gather");
 
     const spr = node.sprite;
     const px = spr.x;
     const py = spr.y - spr.displayHeight * 0.5; // burst from the node's middle
-    this.floatGain(px, py, `+1 ${node.kind}`, RES_TEXT[node.kind]);
+    this.floatGain(px, py, `+${amt} ${node.kind}`, RES_TEXT[node.kind]);
     this.popParticles(px, py, RES_COLOR[node.kind]);
     this.gatherSfx(node.kind);
 
@@ -1566,5 +1819,15 @@ export class WorldScene extends Phaser.Scene {
     this.resHud.setText(
       `🍖 ${Math.floor(r.food)}   🪵 ${Math.floor(r.wood)}   🪨 ${Math.floor(r.stone)}   🏠 ${this.housing}`,
     );
+    const target = s.researchTarget;
+    if (target && TECH_TREE[target]) {
+      const def = TECH_TREE[target];
+      const prog = Math.min(Math.floor(s.knowledge.progress[target]), def.cost);
+      this.researchHud.setText(`🔬 ${def.name}  ${prog}/${def.cost}`);
+    } else {
+      this.researchHud.setText(
+        s.knowledge.available().length ? "🔬 research: none — open the Totem (T)" : "🔬 all tech known",
+      );
+    }
   }
 }

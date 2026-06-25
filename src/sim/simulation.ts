@@ -372,6 +372,43 @@ export class Simulation {
     this.state.researchTarget = tech;
   }
 
+  /**
+   * Player-directed research: pour `points` of insight into the current research
+   * target, mirroring the in-sim research loop (and the event-driven insight
+   * gift) so a chieftain who funds study completes a tech exactly as the
+   * autopiloted tribe would — resource-gated techs still need their bill in hand.
+   * Returns the TechId completed by this push (else null). Because this is driven
+   * from the interactive scene (where the sim is paused), it folds the era/win
+   * step in line so a capstone discovered this way advances the world at once.
+   */
+  fundResearch(points: number): TechId | null {
+    const s = this.state;
+    if (
+      !s.researchTarget ||
+      s.knowledge.has(s.researchTarget) ||
+      !s.knowledge.isUnlocked(s.researchTarget)
+    ) {
+      s.researchTarget = pickResearchTarget(s);
+    }
+    if (!s.researchTarget) return null;
+    const req = TECH_TREE[s.researchTarget].resourceCost;
+    const ready = !req || this.hasResources(req);
+    const completed = s.knowledge.addProgress(s.researchTarget, points, ready);
+    if (completed) {
+      if (req) this.spendResources(req);
+      const def = TECH_TREE[completed];
+      const kind: SimEventType = def.unlocksEra ? "milestone" : "discovery";
+      this.logEvent(kind, def.unlocksEra ? `${def.name} — the ${def.unlocksEra} begins!` : `Discovered ${def.name}.`);
+      s.researchTarget = pickResearchTarget(s);
+      s.era = s.knowledge.currentEra();
+      if (s.era === "Information" && !s.won) {
+        s.won = true;
+        this.logEvent("milestone", "The Information Age dawns — your people reshape the world. The journey is complete.");
+      }
+    }
+    return completed;
+  }
+
   /** Adopt a standing policy stance on a governing axis (see {@link Policies}). */
   setPolicy(axisId: string, stanceId: string): void {
     this.state.policies.set(axisId, stanceId);
