@@ -3,6 +3,8 @@ import {
   acceptCelebrationCount,
   burstForEvent,
   BURST_STYLE,
+  dustBurstCount,
+  DUST_BURST_BASE,
   gatherBurstCount,
   GATHER_BURST_BASE,
   questCelebrationCount,
@@ -89,6 +91,14 @@ describe("event feedback routing", () => {
     expect(rallyBurstCount(50)).toBeLessThanOrEqual(10); // never floods the scene
     // A single muster stays subtler than a whole defence resolving.
     expect(rallyBurstCount(50)).toBeLessThan(raidCelebrationCount(true, 50));
+  });
+
+  it("swells the building dust kick with its cost, but keeps it capped", () => {
+    expect(dustBurstCount(5)).toBe(DUST_BURST_BASE + 1); // a 5-wood campfire → floor(5/5) bonus
+    expect(dustBurstCount(15)).toBe(DUST_BURST_BASE + 3); // a 15-wood hut thuds down harder
+    expect(dustBurstCount(15)).toBeGreaterThan(dustBurstCount(5)); // a pricier build kicks more dust
+    expect(dustBurstCount(0)).toBe(DUST_BURST_BASE); // a free build → baseline, never below it
+    expect(dustBurstCount(1000)).toBeLessThanOrEqual(16); // never floods the scene
   });
 
   it("makes a breach a small, subdued puff regardless of band size", () => {
