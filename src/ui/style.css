@@ -106,6 +106,9 @@ html, body {
 .controls2 button { flex: 1; font-size: 12px; }
 .newrun { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; color: var(--dim, var(--ink)); }
 .newrun select { flex: 1; font: inherit; color: var(--ink); background: var(--panel2); border: 1px solid var(--line); border-radius: 7px; padding: 4px; }
+.newrun.mutators { display: flex; flex-wrap: wrap; gap: 4px 10px; border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; }
+.newrun.mutators legend { padding: 0 4px; }
+.newrun.mutators label { display: flex; align-items: center; gap: 4px; }
 button {
   font: inherit; color: var(--ink); background: var(--panel2);
   border: 1px solid var(--line); border-radius: 7px; padding: 5px 9px; cursor: pointer;

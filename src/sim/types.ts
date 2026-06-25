@@ -329,6 +329,12 @@ export interface SimConfig {
   eventLethality?: number;
   /** Additive world-abundance bonus baked into every tick. Defaults to 0. */
   abundanceBonus?: number;
+  /** Multiplier on disease severity (endemic, outbreak event, epidemics). Defaults to 1. */
+  diseaseLethality?: number;
+  /** Multiplier on research output (faster/slower tech & era progress). Defaults to 1. */
+  researchMult?: number;
+  /** Starting hostility of neighbour tribes in [0,1]; lowers their initial relations. Defaults to 0. */
+  rivalHostility?: number;
   /** Region the tribe starts in (defaults to the tundra homeland). */
   startRegion?: string;
   /** Roguelite carry-over: small additive genome bonus for founders. */

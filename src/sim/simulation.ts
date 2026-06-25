@@ -465,7 +465,7 @@ export class Simulation {
       discoveredRegions: [region.id],
       scouts: 0,
       scoutProgress: 0,
-      rivals: createRivals(this.rivalRng, region.id),
+      rivals: createRivals(this.rivalRng, region.id, this.config.rivalHostility ?? 0),
       settlements: [home],
       totals: {
         births: 0,
@@ -932,7 +932,7 @@ export class Simulation {
     // Compress the accumulated research multiplier: knowledge still accelerates
     // progress, but sub-linearly, so the late eras stay visible rather than
     // collapsing into a single tick once the multipliers compound.
-    points *= Math.pow(e.researchMult, BALANCE.researchCompression) * cooperation;
+    points *= Math.pow(e.researchMult, BALANCE.researchCompression) * cooperation * (this.config.researchMult ?? 1);
     if (points <= 0) return;
 
     // Some techs are gated on a stock of raw resources (e.g. stone to smelt
@@ -1107,7 +1107,7 @@ export class Simulation {
     p += exposure * BALANCE.coldLethality;
     if (ind.food <= 0.05) p += BALANCE.starveLethality;
     // Endemic disease, scaled by the biome and attenuated by medicine/sanitation.
-    p += (1 - ind.genome.diseaseResistance) * BALANCE.chronicDisease * b.diseaseMult * (1 - e.diseaseDefense);
+    p += (1 - ind.genome.diseaseResistance) * BALANCE.chronicDisease * b.diseaseMult * (1 - e.diseaseDefense) * (this.config.diseaseLethality ?? 1);
     p += (1 - ind.health) * 0.04;
     return clamp01(p);
   }
@@ -1122,7 +1122,7 @@ export class Simulation {
     // Difficulty preset scales how deadly random events are; 1 = standard.
     const lethal = this.config.eventLethality ?? 1;
     if (roll < 0.35) {
-      this.applyHazard("diseaseResistance", BALANCE.diseaseLethality * lethal * b.diseaseMult * (1 - e.diseaseDefense));
+      this.applyHazard("diseaseResistance", BALANCE.diseaseLethality * lethal * b.diseaseMult * (1 - e.diseaseDefense) * (this.config.diseaseLethality ?? 1));
       this.logEvent("disease", "A sickness sweeps the camp.");
     } else if (roll < 0.62) {
       // Predators in the wild; organised raids once settled.
@@ -1176,7 +1176,8 @@ export class Simulation {
       densityTerm *
       this.biome().diseaseMult *
       eraTerm *
-      mitigation;
+      mitigation *
+      (this.config.diseaseLethality ?? 1);
     return Math.min(BALANCE.epidemicMaxSeverity, raw);
   }
 
@@ -1997,7 +1998,7 @@ export class Simulation {
     }
     const teamSize = Math.max(1, researchers.length);
     let points = (perHead / teamSize) * Math.pow(teamSize, BALANCE.researchCrowding);
-    points *= Math.pow(e.researchMult, BALANCE.researchCompression) * cooperation;
+    points *= Math.pow(e.researchMult, BALANCE.researchCompression) * cooperation * (this.config.researchMult ?? 1);
     if (points <= 0) return;
     const req = TECH_TREE[s.researchTarget].resourceCost;
     const ready = !req || this.hasResources(req);

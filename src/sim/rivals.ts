@@ -141,9 +141,11 @@ const lastEraIndex = ERAS.length - 1;
 /**
  * Deterministically create the neighbour tribes for a run. Each is placed in a
  * distinct region the player did not start in; given the same RNG state and
- * start region this always yields the same tribes.
+ * start region this always yields the same tribes. `hostility` in [0,1] (the
+ * Hostile Neighbours run mutator) seeds each tribe's starting relations downward,
+ * so neighbours may begin hostile enough to raid.
  */
-export function createRivals(rng: RNG, startRegion: string): RivalTribe[] {
+export function createRivals(rng: RNG, startRegion: string, hostility = 0): RivalTribe[] {
   const candidates = REGIONS.filter((r) => r.id !== startRegion);
   // Deterministic shuffle so home regions are spread, not always the first few.
   for (let i = candidates.length - 1; i > 0; i--) {
@@ -164,7 +166,7 @@ export function createRivals(rng: RNG, startRegion: string): RivalTribe[] {
       eraIndex: 0,
       techProgress: 0,
       disposition: clamp(rng.gauss(0, 0.2), -1, 1),
-      relations: 0,
+      relations: hostility ? clamp(-hostility, -1, 1) : 0,
     });
   }
   return rivals;
