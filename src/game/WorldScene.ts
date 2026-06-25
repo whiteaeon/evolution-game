@@ -14,6 +14,7 @@ import { chooseNpcActivity, type NpcActivity } from "./npcActivity.js";
 import { questMetric, type QuestMetrics, type QuestSpec } from "./quests.js";
 import { buildDialogue, type DialogNode } from "./dialogue.js";
 import { buildRaidSides, resolveRaid } from "./raidDefense.js";
+import { outbreakRisk } from "./epidemicRisk.js";
 import {
   TUTORIAL_STEPS,
   advanceTutorial,
@@ -2774,7 +2775,13 @@ export class WorldScene extends Phaser.Scene {
     const trend = this.foodTrend > 0.05 ? "▲" : this.foodTrend < -0.05 ? "▼" : "▬";
     const net = `${this.foodTrend >= 0 ? "+" : ""}${this.foodTrend.toFixed(1)}`;
     const season = ["❄ Winter", "🌱 Spring", "☀ Summer", "🍂 Autumn"][s.world.seasonIndex] ?? "";
-    this.econHud.setText(`Tribe ${trend} food ${net}/tick · 👥 ${pop}/${cap} · 🏠 ${this.housing} · ${season}`);
+    // Outbreak risk: the sim's epidemic model, surfaced so the player can act on
+    // it — crowding lifts it (huts raise capacity and thin the crowd), medicine
+    // lowers it. `eff` already folds in the player's housing capacity bonus.
+    const risk = outbreakRisk(this.ctrl.sim.epidemicSeverity(eff));
+    this.econHud.setText(
+      `Tribe ${trend} food ${net}/tick · 👥 ${pop}/${cap} · 🏠 ${this.housing} · ${season} · 🦠 ${risk.label} (${risk.pct})`,
+    );
 
     const target = s.researchTarget;
     if (target && TECH_TREE[target]) {
