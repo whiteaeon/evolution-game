@@ -25,8 +25,12 @@ import {
   TECH_TREE,
   individualName,
   notableById,
+  selectLeader,
+  leaderBonus,
   type Biome,
   type Individual,
+  type LeaderBonus,
+  type Notable,
   type TechId,
 } from "../sim/index.js";
 import type { GameController } from "./controller.js";
@@ -173,6 +177,22 @@ export class WorldScene extends Phaser.Scene {
   private npcs: Npc[] = [];
   private hoverLabel!: Phaser.GameObjects.Text;
 
+  // Leaders & notables surfaced from the pure sim: the band's chieftain (crown)
+  // and standout individuals (✦) get a clickable floating marker that opens an
+  // inspect card, and the leader's tribe-wide trait bonus shows in the HUD.
+  private leaderId: number | null = null;
+  private notableMap: Map<number, Notable[]> = new Map();
+  private inspectMarks: {
+    ind: Individual;
+    sprite: Phaser.GameObjects.Image;
+    marker: Phaser.GameObjects.Text;
+  }[] = [];
+  private leaderHud!: Phaser.GameObjects.Text;
+  private inspectCard!: Phaser.GameObjects.Container;
+  private inspectName!: Phaser.GameObjects.Text;
+  private inspectBody!: Phaser.GameObjects.Text;
+  private inspectOpen = false;
+
   private fog: Phaser.GameObjects.Rectangle[] = [];
   private fogRevealed: boolean[] = [];
 
@@ -260,6 +280,7 @@ export class WorldScene extends Phaser.Scene {
 
     this.spawnNpcs();
     this.setupQuests();
+    this.markNotables();
     this.spawnPlayer();
     this.placeTotem();
     this.buildFog();
@@ -269,6 +290,7 @@ export class WorldScene extends Phaser.Scene {
     this.buildBuildBar();
     this.buildQuestLog();
     this.buildTechPanel();
+    this.buildInspectCard();
     // A grid-snapped footprint sits under the ghost so the placement cell — and
     // whether it is affordable (green) or not (red) — is unmistakable.
     this.ghostTile = this.add
@@ -307,6 +329,10 @@ export class WorldScene extends Phaser.Scene {
           else this.closeDialog(); // a click anywhere else leaves the conversation
           return;
         }
+        if (this.inspectOpen) {
+          this.closeInspect(); // a click anywhere closes the inspect card
+          return;
+        }
         if (this.techPanelOpen) {
           if (currentlyOver.some((o) => o.getData("studyBtn"))) {
             this.study();
@@ -330,6 +356,13 @@ export class WorldScene extends Phaser.Scene {
           this.tryPlace(pointer);
           return;
         }
+        const ins = currentlyOver.find((o) => o.getData("inspectId") !== undefined);
+        if (ins) {
+          const id = ins.getData("inspectId") as number;
+          const mark = this.inspectMarks.find((m) => m.ind.id === id);
+          if (mark) this.openInspect(mark.ind);
+          return;
+        }
         const hit = currentlyOver.find((o) => o.getData("npcId") !== undefined);
         if (hit) {
           const id = hit.getData("npcId") as number;
@@ -343,6 +376,7 @@ export class WorldScene extends Phaser.Scene {
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => this.updateGhost(p));
     this.input.keyboard!.on("keydown-ESC", () => {
       if (this.techPanelOpen) this.closeTechPanel();
+      else if (this.inspectOpen) this.closeInspect();
       else this.cancelBuild();
     });
     this.input.keyboard!.on("keydown-L", () => this.toggleQuestLog());
@@ -551,6 +585,17 @@ export class WorldScene extends Phaser.Scene {
         fontFamily: "monospace",
         fontSize: "12px",
         color: "#bfe0ff",
+        backgroundColor: "#00000066",
+        padding: { x: 6, y: 3 },
+      })
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH);
+
+    this.leaderHud = this.add
+      .text(10, 74, "", {
+        fontFamily: "monospace",
+        fontSize: "12px",
+        color: "#ffe54a",
         backgroundColor: "#00000066",
         padding: { x: 6, y: 3 },
       })
@@ -1033,6 +1078,7 @@ export class WorldScene extends Phaser.Scene {
     this.updateNpcs(dt);
     this.updateGather(dt);
     this.updateQuests();
+    this.updateInspectMarks();
     this.revealFog();
     this.updateDayNight(dt);
     this.syncHud();
@@ -1829,5 +1875,135 @@ export class WorldScene extends Phaser.Scene {
         s.knowledge.available().length ? "🔬 research: none — open the Totem (T)" : "🔬 all tech known",
       );
     }
+    const leader = this.leaderId != null ? this.npcs.find((n) => n.ind.id === this.leaderId) : undefined;
+    if (leader) {
+      const b = leaderBonus(leader.ind);
+      this.leaderHud
+        .setText(`👑 ${individualName(leader.ind)} ${b.style} · ${this.leaderBonusLabel(b)}`)
+        .setVisible(true);
+    } else {
+      this.leaderHud.setVisible(false);
+    }
+  }
+
+  // ── leaders & notables ───────────────────────────────────────────────────
+
+  /**
+   * Surface the sim's dormant leadership/naming systems: resolve the band's
+   * chieftain (preferring the sim's appointed leaderId when that individual is
+   * present, else deriving it with the same {@link selectLeader} the sim uses)
+   * and the standout individuals, then float a clickable marker over each.
+   */
+  private markNotables(): void {
+    const present = new Set(this.npcs.map((n) => n.ind.id));
+    const appointed = this.ctrl.sim.state.leaderId;
+    this.leaderId =
+      appointed != null && present.has(appointed)
+        ? appointed
+        : selectLeader(this.npcs.map((n) => n.ind));
+    this.notableMap = notableById(this.ctrl.sim.living);
+
+    for (const n of this.npcs) {
+      const isLeader = n.ind.id === this.leaderId;
+      if (!isLeader && !this.notableMap.has(n.ind.id)) continue;
+      const marker = this.add
+        .text(n.sprite.x, n.sprite.y, isLeader ? "👑" : "✦", {
+          fontFamily: "monospace",
+          fontSize: "15px",
+          color: isLeader ? "#ffe54a" : "#bfe0ff",
+        })
+        .setOrigin(0.5, 1)
+        .setInteractive({ useHandCursor: true });
+      marker.setData("inspectId", n.ind.id);
+      this.inspectMarks.push({ ind: n.ind, sprite: n.sprite, marker });
+    }
+  }
+
+  /** Float each leader/notable marker above its (moving) villager, gently bobbing. */
+  private updateInspectMarks(): void {
+    const bob = Math.sin(this.time.now / 320) * 2;
+    for (const m of this.inspectMarks) {
+      m.marker
+        .setPosition(m.sprite.x, m.sprite.y - m.sprite.displayHeight - 8 + bob)
+        .setDepth(m.sprite.y + 2);
+    }
+  }
+
+  private buildInspectCard(): void {
+    const w = 320;
+    const panel = this.add
+      .rectangle(0, 0, w, 8, 0x141c12, 0.96)
+      .setStrokeStyle(2, 0xffe08a)
+      .setOrigin(0.5, 0);
+    this.inspectName = this.add
+      .text(-w / 2 + 14, 10, "", {
+        fontFamily: "monospace",
+        fontSize: "14px",
+        color: "#ffe08a",
+        fontStyle: "bold",
+      })
+      .setOrigin(0, 0);
+    this.inspectBody = this.add
+      .text(-w / 2 + 14, 34, "", {
+        fontFamily: "monospace",
+        fontSize: "12px",
+        color: "#e9e0c8",
+        wordWrap: { width: w - 28 },
+        lineSpacing: 4,
+      })
+      .setOrigin(0, 0);
+    this.inspectCard = this.add
+      .container(VIEW_W / 2, 70, [panel, this.inspectName, this.inspectBody])
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH + 3)
+      .setVisible(false);
+    this.inspectCard.setData("panel", panel);
+  }
+
+  /** Open the inspect card for a leader/notable: name, role, and trait bonus. */
+  private openInspect(ind: Individual): void {
+    if (this.dialogOpen) this.closeDialog();
+    this.inspectName.setText(individualName(ind));
+    this.inspectBody.setText(this.inspectText(ind));
+    const panel = this.inspectCard.getData("panel") as Phaser.GameObjects.Rectangle;
+    panel.height = this.inspectBody.y + this.inspectBody.height + 12;
+    this.inspectCard.setVisible(true);
+    this.inspectOpen = true;
+    this.hoverLabel.setVisible(false);
+  }
+
+  private closeInspect(): void {
+    this.inspectCard.setVisible(false);
+    this.inspectOpen = false;
+  }
+
+  /** The inspect card's body: the chieftain's role + tribe-wide bonus, then any
+   *  notable epithets — all read straight from the sim's leadership/naming data. */
+  private inspectText(ind: Individual): string {
+    const lines: string[] = [];
+    if (ind.id === this.leaderId) {
+      const b = leaderBonus(ind);
+      lines.push(`Chieftain ${b.style}`);
+      lines.push(`Leads by ${this.cap(b.trait)} — ${this.leaderBonusLabel(b)} for the whole tribe.`);
+    }
+    for (const note of this.notableMap.get(ind.id) ?? []) {
+      lines.push(`${note.title} (${note.detail})`);
+    }
+    return lines.length ? lines.join("\n") : "A member of the tribe.";
+  }
+
+  /** Human-readable form of a leader's one tribe-wide lever, e.g. "+9% research". */
+  private leaderBonusLabel(b: LeaderBonus): string {
+    const lever =
+      b.trait === "strength"
+        ? { mult: b.defenseMult, name: "defense" }
+        : b.trait === "intelligence"
+          ? { mult: b.researchMult, name: "research" }
+          : { mult: b.foodMult, name: "food" };
+    return `+${Math.round(Math.abs(1 - lever.mult) * 100)}% ${lever.name}`;
+  }
+
+  private cap(s: string): string {
+    return s.charAt(0).toUpperCase() + s.slice(1);
   }
 }
