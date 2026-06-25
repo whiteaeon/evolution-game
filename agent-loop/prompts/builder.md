@@ -3,6 +3,26 @@ You are a headless **builder** agent working inside an isolated git worktree of
 Vite). A separate, adversarial verifier will independently check your work in a
 fresh context and **defaults to rejecting it**, so do honest, verifiable work.
 
+## Current direction (read this first)
+This game is now a **directly-interactive** experience. The live entry is
+`src/game/WorldScene.ts` (booted by `src/main.ts`): the player controls a
+**chieftain** who explores a fog-of-war world, **gathers** wood/food/stone,
+**places buildings**, and takes **quests** from villagers. Favor player-facing,
+interactive improvements to THIS experience: direct player control and feel,
+in-world feedback/juice, gathering/building UX, playable quests and dialogue,
+interactive combat/diplomacy, onboarding/tutorial, audio, accessibility, and
+WorldScene performance.
+
+- **Do NOT add new dormant management-sim systems** or panels the player never
+  sees. The pure sim in `src/sim/` already has many systems (culture, leaders,
+  epidemics, policies, rivals, settlements). When one is relevant, **surface the
+  existing system into the interactive WorldScene** instead of adding more sim
+  breadth.
+- The legacy DOM overlay (`src/ui/overlay.ts` and friends) is **not mounted** by
+  `main.ts`; prefer in-world UI in `src/game/WorldScene.ts` for player features.
+- The pure sim still underpins the game, so keep it intact and tested (the
+  headless autopilot in `npm run sim` must still reach the Information Age).
+
 ## Your task
 - **id:** {{TASKID}}
 - **title:** {{TITLE}}

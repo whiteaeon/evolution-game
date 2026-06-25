@@ -83,11 +83,11 @@ function Get-NextTask {
     #    (each gets a unique id so it's never "already done"; verifier still gates it).
     if ($script:SelfImprove) {
         $themes = @(
-            'Raise unit-test coverage of one currently-untested branch or edge case in src/sim — add tests, and fix any real bug they expose.',
-            'Improve one small UX or accessibility detail in the DOM UI (src/ui) without touching the sim.',
-            'Make one small, determinism-preserving performance improvement in the sim or render layer.',
-            'Improve one piece of in-game clarity: a label, tooltip, the chronicle, or tutorial copy.',
-            'Tighten one rough edge: pull a magic number into the BALANCE block, de-duplicate a little code, or sharpen a type.'
+            'Improve one part of the directly-interactive scene src/game/WorldScene.ts (player control/feel, gathering, building, NPCs, fog-of-war, or quests) so it is more responsive or satisfying.',
+            'Add feedback or juice to one interactive action in WorldScene (gather, build, quest accept/turn-in, combat): particles, floating text, a synthesized sfx, or an animation.',
+            'Surface ONE existing-but-dormant sim system (culture, leaders, epidemics, policies, rivals, settlements) INTO the interactive WorldScene UI so the player can see or use it. Do NOT invent a new sim system.',
+            'Improve interactive onboarding, accessibility, or controls clarity for WorldScene: tutorial copy, a controls/help overlay, keyboard-only play, or clearer/colourblind-safe markers.',
+            'Make one small, determinism-preserving performance or robustness improvement to the interactive scene (off-screen culling, particle caps, cleaning up depleted nodes or finished tweens).'
         )
         $theme = $themes[[Math]::Abs([int](Get-Date).Minute) % $themes.Count]
         Write-AgentLog 'Discovery: backlog + TODOs empty — emitting a self-improvement task.'
@@ -95,7 +95,7 @@ function Get-NextTask {
             id          = 'self-improve-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
             priority    = 9; type = 'self-improve'; source = 'self-improve'
             title       = 'Autonomous improvement: ' + ($theme.Split('—')[0].Trim().TrimEnd('.'))
-            description = "$theme`n`nMake the SMALLEST change that delivers one concrete, genuine improvement. Preserve the pure-sim / render split (no Phaser/DOM in src/sim). Add or extend tests for any behaviour change. Do NOT weaken existing tests or break the sim reaching the Information Age."
+            description = "$theme`n`nDIRECTION: this game is now a DIRECTLY-INTERACTIVE experience whose live entry is src/game/WorldScene.ts (booted by src/main.ts) - a player-controlled chieftain explores, gathers, builds, and takes quests. Favor player-facing, interactive improvements to THAT experience. Do NOT add new dormant management-sim systems or panels the player never sees; when a sim system is relevant, surface the EXISTING one into WorldScene. Make the SMALLEST change that delivers one concrete, genuine improvement. Preserve the pure-sim / render split (no Phaser/DOM in src/sim). Add or extend tests for any behaviour change. Do NOT weaken existing tests or break the sim reaching the Information Age."
             verify      = 'npm test + build pass; sim still reaches the Information Age in range; no weakened/deleted tests; sim/render split intact; the change is small and genuinely useful.'
         }
     }
