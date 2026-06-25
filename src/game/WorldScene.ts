@@ -41,6 +41,25 @@ const FOG_CELL = 64;
 const FOG_DEPTH = 5000;
 const UI_DEPTH = 100000;
 
+/** One full dawn→day→dusk→night→dawn loop, in render time (sim stays paused). */
+const DAY_LENGTH_MS = 90_000;
+/**
+ * Ambient sky-tint keyframes across the day — `[t, r, g, b, alpha]` with t in
+ * 0..1. Dawn warms to orange, noon is clear, dusk burns, night goes deep blue.
+ * A full-screen overlay lerps between adjacent keys each frame.
+ */
+const SKY_KEYS: readonly [number, number, number, number, number][] = [
+  [0.0, 10, 18, 52, 0.58],
+  [0.22, 38, 30, 72, 0.46],
+  [0.3, 255, 150, 90, 0.26],
+  [0.42, 255, 240, 210, 0.04],
+  [0.5, 255, 255, 255, 0.0],
+  [0.62, 255, 240, 205, 0.05],
+  [0.72, 255, 125, 70, 0.3],
+  [0.82, 120, 52, 92, 0.44],
+  [1.0, 10, 18, 52, 0.58],
+];
+
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 /** The raw resources you can gather and spend. */
@@ -131,6 +150,12 @@ export class WorldScene extends Phaser.Scene {
 
   private hud!: Phaser.GameObjects.Text;
 
+  // Render-side day/night clock (independent of the paused sim).
+  private dayTime = 0.32; // 0..1 fraction of the day; start mid-morning
+  private ambient!: Phaser.GameObjects.Rectangle; // full-screen sky tint
+  private clockHud!: Phaser.GameObjects.Text;
+  private nightLights: { glow: Phaser.GameObjects.Ellipse; max: number; fire: boolean }[] = [];
+
   private buildMode: BuildType | null = null;
   private ghost!: Phaser.GameObjects.Image;
   private ghostTile!: Phaser.GameObjects.Rectangle; // snapped footprint under the ghost
@@ -174,6 +199,7 @@ export class WorldScene extends Phaser.Scene {
     this.add.image(CAMP.x, CAMP.y - 6, "shelter-cave").setDepth(CAMP.y);
     if (this.ctrl.sim.state.knowledge.has("fire")) {
       this.add.image(CAMP.x + 2, CAMP.y + 30, "fire-0").setDepth(CAMP.y + 30);
+      this.addNightGlow(CAMP.x + 2, CAMP.y + 34, 84, 48, 0xffb066, 0.5, true);
     }
 
     this.spawnNpcs();
@@ -181,6 +207,7 @@ export class WorldScene extends Phaser.Scene {
     this.spawnPlayer();
     this.buildFog();
     this.buildHud();
+    this.buildDayNight();
     this.buildDialog();
     this.buildBuildBar();
     // A grid-snapped footprint sits under the ghost so the placement cell — and
@@ -674,9 +701,10 @@ export class WorldScene extends Phaser.Scene {
       if (t.id === "hut") {
         this.housing += 1; // shelter for more of the tribe
         this.solids.push({ x: wx, y: wy, r: 10 });
+        this.addNightGlow(wx, wy - 6, 30, 22, 0xffd27a, 0.45, false); // a lit window after dark
         this.flash("Hut built — +1 housing");
       } else {
-        this.add.ellipse(wx, wy, 72, 42, 0xffb066, 0.18).setDepth(1); // campfire's warm glow
+        this.addNightGlow(wx, wy, 72, 42, 0xffb066, 0.5, true); // campfire's warm glow, lit at night
         this.flash("Campfire built — warmth");
       }
     }
@@ -799,6 +827,7 @@ export class WorldScene extends Phaser.Scene {
     this.updateGather(dt);
     this.updateQuests();
     this.revealFog();
+    this.updateDayNight(dt);
     this.syncHud();
   }
 
@@ -1154,6 +1183,69 @@ export class WorldScene extends Phaser.Scene {
         this.tweens.add({ targets: this.fog[i], alpha: 0, duration: 350 });
       }
     }
+  }
+
+  // ── day/night cycle ────────────────────────────────────────────────────────
+
+  /** The sky-tint overlay and the HUD time-of-day readout. */
+  private buildDayNight(): void {
+    this.ambient = this.add
+      .rectangle(0, 0, VIEW_W, VIEW_H, 0x0a1234, 0)
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(FOG_DEPTH - 20); // over the world, under the fog and the HUD
+    this.clockHud = this.add
+      .text(VIEW_W - 10, 8, "", {
+        fontFamily: "monospace",
+        fontSize: "12px",
+        color: "#e9e0c8",
+        backgroundColor: "#00000066",
+        padding: { x: 6, y: 4 },
+      })
+      .setOrigin(1, 0)
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH);
+  }
+
+  /** Register a warm light that fades up at night and fades out by day. */
+  private addNightGlow(x: number, y: number, w: number, h: number, color: number, max: number, fire: boolean): void {
+    const glow = this.add.ellipse(x, y, w, h, color, 0).setDepth(1);
+    this.nightLights.push({ glow, max, fire });
+  }
+
+  /** Sky tint at a given time of day, lerped between the keyframes. */
+  private ambientAt(t: number): { color: number; alpha: number } {
+    let i = 0;
+    while (i < SKY_KEYS.length - 1 && t > SKY_KEYS[i + 1][0]) i++;
+    const a = SKY_KEYS[i];
+    const b = SKY_KEYS[Math.min(i + 1, SKY_KEYS.length - 1)];
+    const span = b[0] - a[0] || 1;
+    const f = clamp01((t - a[0]) / span);
+    const r = Math.round(a[1] + (b[1] - a[1]) * f);
+    const g = Math.round(a[2] + (b[2] - a[2]) * f);
+    const bl = Math.round(a[3] + (b[3] - a[3]) * f);
+    return { color: (r << 16) | (g << 8) | bl, alpha: a[4] + (b[4] - a[4]) * f };
+  }
+
+  private phaseLabel(t: number): string {
+    if (t < 0.23 || t >= 0.82) return "🌙 Night";
+    if (t < 0.34) return "🌅 Dawn";
+    if (t < 0.68) return "☀ Day";
+    return "🌇 Dusk";
+  }
+
+  /** Advance the clock and apply the tint, the lit campfires/huts, and the HUD. */
+  private updateDayNight(dt: number): void {
+    this.dayTime = (this.dayTime + dt / DAY_LENGTH_MS) % 1;
+    const { color, alpha } = this.ambientAt(this.dayTime);
+    this.ambient.setFillStyle(color, alpha);
+    // 1 at midnight, 0 at noon — drives how strongly the warm lights glow.
+    const night = 0.5 + 0.5 * Math.cos(this.dayTime * Math.PI * 2);
+    const flicker = 0.85 + 0.15 * Math.sin(this.time.now / 90);
+    for (const l of this.nightLights) {
+      l.glow.setAlpha(l.max * night * (l.fire ? flicker : 1));
+    }
+    this.clockHud.setText(this.phaseLabel(this.dayTime));
   }
 
   private syncHud(): void {
