@@ -52,6 +52,7 @@ const KIND_PRIORITY: SimEventType[] = [
   "coldSnap",
   "bounty",
   "discovery",
+  "dialogue",
 ];
 
 /** The kind of the year's most salient event (falls back to the first event). */
