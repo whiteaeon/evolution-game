@@ -127,6 +127,20 @@ describe("neighbourRosterLine", () => {
     expect(line).toContain("might 42%"); // 0.42 → 42%
   });
 
+  it("shows how far a rival has crept toward its next era", () => {
+    const line = neighbourRosterLine(rival({ eraIndex: 1, techProgress: 0.37 }), regionName);
+    expect(line).toContain(`${ERAS[1]} (→ next 37%)`); // 0.37 → 37%
+  });
+
+  it("omits the next-era hint once a rival reaches the final era", () => {
+    const line = neighbourRosterLine(
+      rival({ eraIndex: ERAS.length - 1, techProgress: 0.9 }),
+      regionName,
+    );
+    expect(line).toContain(ERAS[ERAS.length - 1]);
+    expect(line).not.toContain("→ next");
+  });
+
   it("tags the entry by disposition and shows relations to two decimals", () => {
     const hostile = neighbourRosterLine(rival({ disposition: -0.8, relations: -0.4 }), regionName);
     expect(hostile).toContain(dispositionStyle(-0.8).icon);
