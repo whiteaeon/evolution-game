@@ -9,6 +9,7 @@ import {
   type MorphParams,
 } from "./textures.js";
 import { HOMININ_WALK, homininFrameKey } from "./homininWalk.js";
+import { chooseNpcActivity, type NpcActivity } from "./npcActivity.js";
 import {
   ERAS,
   individualName,
@@ -93,6 +94,9 @@ interface Npc {
   homeY: number;
   tx: number;
   ty: number;
+  activity: NpcActivity; // what they're currently doing on arrival at (tx,ty)
+  workT: number; // ms spent at the current spot — drives the work bob and lingering
+  faceX: number; // world x they turn toward while working (node or fire)
 }
 
 /** A harvestable node in the world — a tree, bush, rock or planted crop. */
@@ -163,6 +167,7 @@ export class WorldScene extends Phaser.Scene {
 
   private solids: { x: number; y: number; r: number }[] = [];
   private gatherables: Gatherable[] = [];
+  private campfires: { x: number; y: number }[] = []; // fires villagers cluster at after dark
   private gatherKey!: Phaser.Input.Keyboard.Key;
   private gatherCooldown = 0;
   private sfxCtx: AudioContext | null = null;
@@ -200,6 +205,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.ctrl.sim.state.knowledge.has("fire")) {
       this.add.image(CAMP.x + 2, CAMP.y + 30, "fire-0").setDepth(CAMP.y + 30);
       this.addNightGlow(CAMP.x + 2, CAMP.y + 34, 84, 48, 0xffb066, 0.5, true);
+      this.campfires.push({ x: CAMP.x + 2, y: CAMP.y + 30 });
     }
 
     this.spawnNpcs();
@@ -383,7 +389,18 @@ export class WorldScene extends Phaser.Scene {
       sprite.setData("npcId", ind.id);
       sprite.on("pointerover", () => this.showHover(ind, sprite));
       sprite.on("pointerout", () => this.hoverLabel.setVisible(false));
-      this.npcs.push({ ind, sprite, baseKey, homeX: x, homeY: y, tx: x, ty: y });
+      this.npcs.push({
+        ind,
+        sprite,
+        baseKey,
+        homeX: x,
+        homeY: y,
+        tx: x,
+        ty: y,
+        activity: "wander",
+        workT: 0,
+        faceX: x,
+      });
     });
   }
 
@@ -705,6 +722,7 @@ export class WorldScene extends Phaser.Scene {
         this.flash("Hut built — +1 housing");
       } else {
         this.addNightGlow(wx, wy, 72, 42, 0xffb066, 0.5, true); // campfire's warm glow, lit at night
+        this.campfires.push({ x: wx, y: wy }); // villagers will gather here after dark
         this.flash("Campfire built — warmth");
       }
     }
@@ -823,7 +841,7 @@ export class WorldScene extends Phaser.Scene {
   override update(_t: number, dt: number): void {
     this.ctrl.update(dt); // keeps the world model alive (no-op while paused)
     this.movePlayer(dt);
-    this.wanderNpcs(dt);
+    this.updateNpcs(dt);
     this.updateGather(dt);
     this.updateQuests();
     this.revealFog();
@@ -831,8 +849,13 @@ export class WorldScene extends Phaser.Scene {
     this.syncHud();
   }
 
-  /** Gentle idle wandering so the camp feels alive even before time is running. */
-  private wanderNpcs(dt: number): void {
+  /**
+   * Give the band visible daily lives: villagers walk to nearby trees/bushes (or
+   * a placed farm) and play a gather/tending bob, and after dark most drift to a
+   * campfire to cluster around its warmth. All render-side and lightweight — the
+   * re-decide search runs only when a villager finishes a spot, never per frame.
+   */
+  private updateNpcs(dt: number): void {
     this.npcTimer += dt;
     if (this.npcTimer > 220) {
       this.npcTimer = 0;
@@ -844,22 +867,85 @@ export class WorldScene extends Phaser.Scene {
       const dx = n.tx - s.x;
       const dy = n.ty - s.y;
       const d = Math.hypot(dx, dy);
-      if (d < 3) {
-        const a = Math.random() * Math.PI * 2;
-        const r = Math.random() * 55;
-        n.tx = Phaser.Math.Clamp(n.homeX + Math.cos(a) * r, 30, WORLD_W - 30);
-        n.ty = Phaser.Math.Clamp(n.homeY + Math.sin(a) * r, 50, WORLD_H - 20);
-        if (s.texture.key !== n.baseKey) s.setTexture(n.baseKey);
+      if (d >= 3) {
+        // En route — reuse the shared walk cycle and keep depth-sorted by feet.
+        s.x += (dx / d) * speed;
+        s.y += (dy / d) * speed;
+        s.setDepth(s.y);
+        if (s.scaleX !== 1 || s.scaleY !== 1) s.setScale(1);
+        s.setFlipX(dx < 0);
+        const pose = HOMININ_WALK[(this.npcPhase + i) & 3];
+        const fk = homininFrameKey(n.baseKey, pose);
+        if (s.texture.key !== fk) s.setTexture(fk);
         return;
       }
-      s.x += (dx / d) * speed;
-      s.y += (dy / d) * speed;
-      s.setDepth(s.y);
-      s.setFlipX(dx < 0);
-      const pose = HOMININ_WALK[(this.npcPhase + i) & 3];
-      const fk = homininFrameKey(n.baseKey, pose);
-      if (s.texture.key !== fk) s.setTexture(fk);
+      // Arrived: act out the chosen activity, then re-pick after a short linger.
+      n.workT += dt;
+      if (s.texture.key !== n.baseKey) s.setTexture(n.baseKey);
+      s.setFlipX(n.faceX < s.x);
+      if (n.activity === "gather") {
+        // A chopping/tending bob in place — quick squash-and-stretch.
+        const b = Math.abs(Math.sin(n.workT / 110));
+        s.setScale(1 + b * 0.05, 1 - b * 0.08);
+      } else if (s.scaleX !== 1 || s.scaleY !== 1) {
+        s.setScale(1); // campfire/wander: stand still
+      }
+      const linger = n.activity === "campfire" ? 4000 : n.activity === "gather" ? 2200 : 0;
+      if (n.workT >= linger) this.repickNpc(n);
     });
+  }
+
+  private isNight(): boolean {
+    return this.dayTime < 0.23 || this.dayTime >= 0.82;
+  }
+
+  /** Nearest tree/bush/crop to a point, within range — a spot worth working. */
+  private nearestNodeTo(x: number, y: number, range: number): Gatherable | null {
+    let best: Gatherable | null = null;
+    let bestD = range;
+    for (const g of this.gatherables) {
+      const d = Phaser.Math.Distance.Between(x, y, g.sprite.x, g.sprite.y);
+      if (d < bestD) {
+        bestD = d;
+        best = g;
+      }
+    }
+    return best;
+  }
+
+  /** Choose a villager's next activity and walk target from the world around them. */
+  private repickNpc(n: Npc): void {
+    n.workT = 0;
+    const node = this.nearestNodeTo(n.homeX, n.homeY, 220);
+    const fire = this.campfires.length
+      ? this.campfires[Math.floor(Math.random() * this.campfires.length)]
+      : null;
+    n.activity = chooseNpcActivity({
+      night: this.isNight(),
+      hasCampfire: fire !== null,
+      hasNearbyNode: node !== null,
+      campfireRoll: Math.random(),
+      workRoll: Math.random(),
+    });
+    if (n.activity === "campfire" && fire) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 26 + Math.random() * 16;
+      n.tx = Phaser.Math.Clamp(fire.x + Math.cos(a) * r, 30, WORLD_W - 30);
+      n.ty = Phaser.Math.Clamp(fire.y + Math.sin(a) * r * 0.7, 50, WORLD_H - 20);
+      n.faceX = fire.x;
+    } else if (n.activity === "gather" && node) {
+      // Stand just beside the node (toward home), not on top of it, and face it.
+      const a = Math.atan2(n.homeY - node.sprite.y, n.homeX - node.sprite.x);
+      n.tx = Phaser.Math.Clamp(node.sprite.x + Math.cos(a) * 16, 30, WORLD_W - 30);
+      n.ty = Phaser.Math.Clamp(node.sprite.y + Math.sin(a) * 8 + 2, 50, WORLD_H - 20);
+      n.faceX = node.sprite.x;
+    } else {
+      n.activity = "wander";
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.random() * 55;
+      n.tx = Phaser.Math.Clamp(n.homeX + Math.cos(a) * r, 30, WORLD_W - 30);
+      n.ty = Phaser.Math.Clamp(n.homeY + Math.sin(a) * r, 50, WORLD_H - 20);
+    }
   }
 
   // ── quests ───────────────────────────────────────────────────────────────
