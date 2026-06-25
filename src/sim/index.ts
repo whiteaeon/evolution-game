@@ -4,6 +4,7 @@ export * from "./genome.js";
 export * from "./naming.js";
 export * from "./leadership.js";
 export * from "./knowledge.js";
+export * from "./culture.js";
 export * from "./regions.js";
 export * from "./rivals.js";
 export * from "./difficulty.js";
