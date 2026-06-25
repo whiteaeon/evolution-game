@@ -58,6 +58,7 @@ import {
   type TechId,
 } from "../sim/index.js";
 import { dispositionStyle, neighbourRosterLine } from "../ui/diplomacy.js";
+import { beliefEffectLabel } from "../ui/belief.js";
 import { settlementRosterLine } from "../ui/settlements.js";
 import { climateReadout } from "../ui/climate.js";
 import { policyOptions, selectionPressureLabel } from "./policyMenu.js";
@@ -3545,7 +3546,7 @@ export class WorldScene extends Phaser.Scene {
     const stage = c.stage();
     const next = BELIEF_STAGES[c.level()]; // the next unreached stage, if any
     let belief = `🔥 Belief ${Math.floor(c.points)}`;
-    if (stage) belief += ` · ${stage.name}`;
+    if (stage) belief += ` · ${stage.name} (${beliefEffectLabel(stage)})`;
     belief += next ? `  (next: ${next.name} @ ${next.threshold})` : " · zenith";
     this.cultureHud.setText(belief);
 
