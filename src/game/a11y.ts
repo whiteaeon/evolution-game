@@ -23,6 +23,7 @@ export const CONTROLS: readonly ControlHint[] = [
   { keys: "G", action: "Send a gift to the neighbour camp" },
   { keys: "F", action: "Rally a villager during a raid" },
   { keys: "T", action: "Open the research totem" },
+  { keys: "P", action: "Open the council (standing customs / policies)" },
   { keys: "L", action: "Toggle the quest log" },
   { keys: "M", action: "Mute / unmute sound" },
   { keys: "Esc", action: "Close a panel or cancel building" },

@@ -41,6 +41,7 @@ import {
   type TechId,
 } from "../sim/index.js";
 import { dispositionStyle } from "../ui/diplomacy.js";
+import { policyOptions } from "./policyMenu.js";
 import { CONTROLS, QUEST_MARKER, BUILD_MARKER } from "./a11y.js";
 import { WorldAudio } from "../ui/audio.js";
 import type { GameController } from "./controller.js";
@@ -77,6 +78,10 @@ const UI_DEPTH = 100000;
 // Research (tech) panel geometry, shared by its frame and the row/button layout.
 const TECH_W = 452;
 const TECH_H = 236;
+
+// Council (policies) panel geometry, shared by its frame and the stance rows.
+const POLICY_W = 452;
+const POLICY_H = 248;
 
 /** One full dawn→day→dusk→night→dawn loop, in render time (sim stays paused). */
 const DAY_LENGTH_MS = 90_000;
@@ -345,6 +350,14 @@ export class WorldScene extends Phaser.Scene {
   private techPanelOpen = false;
   private techRows: Phaser.GameObjects.Text[] = []; // live, clickable available-tech rows
   private studyBtn!: Phaser.GameObjects.Text;
+
+  // Council: surfaces the pure sim's dormant standing Policies. The panel (P)
+  // lists each governing axis's stances; adopting one calls sim.setPolicy, whose
+  // trade-offs the sim already folds into its live effects bundle and selection.
+  private policyPanel!: Phaser.GameObjects.Container;
+  private policyPanelBody!: Phaser.GameObjects.Text;
+  private policyPanelOpen = false;
+  private policyRows: Phaser.GameObjects.Text[] = []; // live, clickable stance rows
   private researchHud!: Phaser.GameObjects.Text;
   private campFireLit = false; // camp hearth shown once 'fire' is known
 
@@ -412,6 +425,7 @@ export class WorldScene extends Phaser.Scene {
     this.buildBuildBar();
     this.buildQuestLog();
     this.buildTechPanel();
+    this.buildPolicyPanel();
     this.buildInspectCard();
     this.buildHelpOverlay();
     this.buildSaveBar();
@@ -494,6 +508,12 @@ export class WorldScene extends Phaser.Scene {
           }
           return;
         }
+        if (this.policyPanelOpen) {
+          const row = currentlyOver.find((o) => o.getData("policyAxis") !== undefined);
+          if (row) this.choosePolicy(row.getData("policyAxis") as string, row.getData("policyStance") as string);
+          else this.closePolicyPanel(); // a click off the rows leaves the panel
+          return;
+        }
         if (currentlyOver.some((o) => o.getData("totem"))) {
           this.openTechPanel();
           return;
@@ -529,11 +549,13 @@ export class WorldScene extends Phaser.Scene {
       if (this.helpOpen) this.toggleHelp();
       else if (this.dialogOpen) this.closeDialog();
       else if (this.techPanelOpen) this.closeTechPanel();
+      else if (this.policyPanelOpen) this.closePolicyPanel();
       else if (this.inspectOpen) this.closeInspect();
       else this.cancelBuild();
     });
     this.input.keyboard!.on("keydown-L", () => this.toggleQuestLog());
     this.input.keyboard!.on("keydown-T", () => this.toggleTechPanel());
+    this.input.keyboard!.on("keydown-P", () => this.togglePolicyPanel());
     this.input.keyboard!.on("keydown-M", () => this.toggleMute());
     this.input.keyboard!.on("keydown-H", () => this.toggleHelp());
     this.input.keyboard!.on("keydown-E", () => this.interact()); // talk to a nearby villager
@@ -589,6 +611,11 @@ export class WorldScene extends Phaser.Scene {
     if (this.techPanelOpen) {
       const id = this.ctrl.sim.state.knowledge.available().slice(0, 6)[n - 1];
       if (id) this.chooseTech(id);
+      return;
+    }
+    if (this.policyPanelOpen) {
+      const opt = policyOptions(this.ctrl.sim.state.policies).find((o) => o.index === n);
+      if (opt) this.choosePolicy(opt.axisId, opt.stance.id);
       return;
     }
     const t = BUILD_TYPES[n - 1];
@@ -1934,6 +1961,7 @@ export class WorldScene extends Phaser.Scene {
 
   private openTechPanel(): void {
     if (this.dialogOpen) this.closeDialog();
+    if (this.policyPanelOpen) this.closePolicyPanel();
     this.cancelBuild();
     this.techPanelOpen = true;
     this.techPanel.setVisible(true);
@@ -2027,6 +2055,127 @@ export class WorldScene extends Phaser.Scene {
   private chooseTech(id: TechId): void {
     this.ctrl.sim.setResearchTarget(id);
     this.refreshTechPanel();
+  }
+
+  // ── council (standing policies) ──────────────────────────────────────────────
+
+  private buildPolicyPanel(): void {
+    // The static frame lives in a container; the interactive stance rows are
+    // scene-level and rebuilt/destroyed per open (like the tech panel), so nothing
+    // stays hit-testable once the panel is closed.
+    const w = POLICY_W;
+    const h = POLICY_H;
+    const panel = this.add.rectangle(0, 0, w, h, 0x18120a, 0.95).setStrokeStyle(2, 0xc8a45f);
+    const title = this.add
+      .text(-w / 2 + 14, -h / 2 + 9, "The Council — standing customs (P)", {
+        fontFamily: "monospace",
+        fontSize: "14px",
+        color: "#ffd98a",
+        fontStyle: "bold",
+      })
+      .setOrigin(0, 0);
+    this.policyPanelBody = this.add
+      .text(-w / 2 + 14, -h / 2 + 30, "", {
+        fontFamily: "monospace",
+        fontSize: "11px",
+        color: "#e9e0c8",
+        wordWrap: { width: w - 28 },
+        lineSpacing: 3,
+      })
+      .setOrigin(0, 0);
+    const hint = this.add
+      .text(w / 2 - 12, h / 2 - 10, "1–6 or click a custom · Esc to close", {
+        fontFamily: "monospace",
+        fontSize: "10px",
+        color: "#9a8a6a",
+      })
+      .setOrigin(1, 1);
+    this.policyPanel = this.add
+      .container(VIEW_W / 2, VIEW_H / 2 - 4, [panel, title, this.policyPanelBody, hint])
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH + 1)
+      .setVisible(false);
+  }
+
+  private togglePolicyPanel(): void {
+    if (this.policyPanelOpen) this.closePolicyPanel();
+    else this.openPolicyPanel();
+  }
+
+  private openPolicyPanel(): void {
+    if (this.dialogOpen) this.closeDialog();
+    if (this.techPanelOpen) this.closeTechPanel();
+    this.cancelBuild();
+    this.policyPanelOpen = true;
+    this.policyPanel.setVisible(true);
+    this.refreshPolicyPanel();
+  }
+
+  private closePolicyPanel(): void {
+    this.policyPanelOpen = false;
+    this.policyPanel.setVisible(false);
+    this.policyRows.forEach((r) => r.destroy());
+    this.policyRows = [];
+  }
+
+  /** Redraw the council from the sim's live policy stances (header + stance rows). */
+  private refreshPolicyPanel(): void {
+    const policies = this.ctrl.sim.state.policies;
+    const active = policies.active();
+    const head =
+      active.length === 0
+        ? "No standing custom — the tribe lives by no fixed rule. Adopt a stance on each axis; every choice is a trade-off the whole tribe lives by."
+        : `Customs in force: ${active.map((s) => s.name).join(", ")}.`;
+    this.policyPanelBody.setText(head);
+
+    this.policyRows.forEach((r) => r.destroy());
+    this.policyRows = [];
+    const left = VIEW_W / 2 - POLICY_W / 2 + 18;
+    let y = VIEW_H / 2 - 4 - POLICY_H / 2 + 64;
+    for (const opt of policyOptions(policies)) {
+      if (opt.axisStart) {
+        if (opt.index > 1) y += 6; // a little air between axes
+        this.policyRows.push(
+          this.add
+            .text(left, y, `${opt.axisName}`, {
+              fontFamily: "monospace",
+              fontSize: "11px",
+              color: "#c8a45f",
+              fontStyle: "bold",
+            })
+            .setOrigin(0, 0)
+            .setScrollFactor(0)
+            .setDepth(UI_DEPTH + 2),
+        );
+        y += 15;
+      }
+      const row = this.add
+        .text(left + 8, y, `${opt.index}. ${opt.selected ? "●" : "○"} ${opt.stance.name} — ${opt.stance.blurb}`, {
+          fontFamily: "monospace",
+          fontSize: "11px",
+          color: opt.selected ? "#ffe08a" : "#cfc4a8",
+          wordWrap: { width: POLICY_W - 44 },
+        })
+        .setOrigin(0, 0)
+        .setScrollFactor(0)
+        .setDepth(UI_DEPTH + 2)
+        .setInteractive({ useHandCursor: true });
+      row.setData("policyAxis", opt.axisId);
+      row.setData("policyStance", opt.stance.id);
+      row.on("pointerover", () => row.setColor("#ffffff"));
+      row.on("pointerout", () => row.setColor(opt.selected ? "#ffe08a" : "#cfc4a8"));
+      this.policyRows.push(row);
+      y += row.height + 4;
+    }
+  }
+
+  /** Adopt a standing policy stance — surfaces straight to the pure sim. */
+  private choosePolicy(axisId: string, stanceId: string): void {
+    const policies = this.ctrl.sim.state.policies;
+    if (policies.stanceOf(axisId).id === stanceId) return; // already in force — no-op
+    this.ctrl.sim.setPolicy(axisId, stanceId);
+    this.audio.build(true);
+    this.refreshPolicyPanel();
   }
 
   /** Spend food to pour insight into the current target; reflect any discovery. */
