@@ -26,7 +26,7 @@ export function questLogHTML(quests: QuestProgress[], defs: QuestDef[]): string 
         <div class="quest-h"><span class="quest-t">${mark}${def.title}</span>
           <span class="quest-r">${rewardText(def.reward)}</span></div>
         <div class="quest-d">${def.description}</div>
-        <span class="qprog"><i style="width:${pct}%"></i></span>
+        <span class="qprog" role="progressbar" aria-valuemin="0" aria-valuemax="${q.target}" aria-valuenow="${q.progress}" aria-label="${def.title} progress"><i style="width:${pct}%"></i></span>
         <span class="quest-n">${q.progress}/${q.target}</span></div>`;
     })
     .join("");
