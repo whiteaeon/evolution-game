@@ -53,7 +53,7 @@ import { dispositionStyle, neighbourRosterLine } from "../ui/diplomacy.js";
 import { settlementRosterLine } from "../ui/settlements.js";
 import { climateReadout } from "../ui/climate.js";
 import { policyOptions } from "./policyMenu.js";
-import { CONTROLS, QUEST_MARKER, BUILD_MARKER, movementLocked } from "./a11y.js";
+import { CONTROLS, QUEST_MARKER, QUEST_MARKER_LEGEND, BUILD_MARKER, movementLocked } from "./a11y.js";
 import { WorldAudio } from "../ui/audio.js";
 import type { GameController } from "./controller.js";
 
@@ -753,7 +753,10 @@ export class WorldScene extends Phaser.Scene {
   private buildHelpOverlay(): void {
     const w = 392;
     const rowH = 18;
-    const h = 52 + CONTROLS.length * rowH;
+    const legendRowH = 17;
+    const controlsH = CONTROLS.length * rowH;
+    const legendH = 20 + QUEST_MARKER_LEGEND.length * legendRowH; // "Map markers" header + rows
+    const h = 56 + controlsH + legendH;
     const panel = this.add.rectangle(0, 0, w, h, 0x10140d, 0.96).setStrokeStyle(2, 0xffe08a);
     const title = this.add
       .text(-w / 2 + 16, -h / 2 + 12, "Controls", {
@@ -772,6 +775,38 @@ export class WorldScene extends Phaser.Scene {
         lineSpacing: 6,
       })
       .setOrigin(0, 0);
+    // Map-marker legend: explains the floating "!" / "✓" over villagers. Each glyph
+    // keeps its own world colour (colourblind-safe — glyph AND hue) beside its meaning.
+    const legendTop = -h / 2 + 40 + controlsH + 6;
+    const legendTitle = this.add
+      .text(-w / 2 + 16, legendTop, "Map markers", {
+        fontFamily: "monospace",
+        fontSize: "13px",
+        color: "#ffe08a",
+        fontStyle: "bold",
+      })
+      .setOrigin(0, 0);
+    const legend: Phaser.GameObjects.Text[] = [];
+    QUEST_MARKER_LEGEND.forEach((e, i) => {
+      const ry = legendTop + 18 + i * legendRowH;
+      legend.push(
+        this.add
+          .text(-w / 2 + 16, ry, e.glyph, {
+            fontFamily: "monospace",
+            fontSize: "12px",
+            color: e.color,
+            fontStyle: "bold",
+          })
+          .setOrigin(0, 0),
+        this.add
+          .text(-w / 2 + 34, ry, e.meaning, {
+            fontFamily: "monospace",
+            fontSize: "12px",
+            color: "#e9e0c8",
+          })
+          .setOrigin(0, 0),
+      );
+    });
     const hint = this.add
       .text(0, h / 2 - 8, "? or H or Esc to close", {
         fontFamily: "monospace",
@@ -780,7 +815,7 @@ export class WorldScene extends Phaser.Scene {
       })
       .setOrigin(0.5, 1);
     this.helpOverlay = this.add
-      .container(VIEW_W / 2, VIEW_H / 2, [panel, title, text, hint])
+      .container(VIEW_W / 2, VIEW_H / 2, [panel, title, text, legendTitle, ...legend, hint])
       .setScrollFactor(0)
       .setDepth(UI_DEPTH + 8)
       .setVisible(false);
