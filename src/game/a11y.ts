@@ -25,6 +25,7 @@ export const CONTROLS: readonly ControlHint[] = [
   { keys: "T", action: "Open the research totem" },
   { keys: "P", action: "Open the council (standing customs / policies)" },
   { keys: "N", action: "Open the neighbours roster (rival tribes)" },
+  { keys: "C", action: "Open the settlements roster (your tribe's camps)" },
   { keys: "L", action: "Toggle the quest log" },
   { keys: "M", action: "Mute / unmute sound" },
   { keys: "Esc", action: "Close a panel or cancel building" },

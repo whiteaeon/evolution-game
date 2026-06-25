@@ -47,6 +47,7 @@ import {
   type TechId,
 } from "../sim/index.js";
 import { dispositionStyle, neighbourRosterLine } from "../ui/diplomacy.js";
+import { settlementRosterLine } from "../ui/settlements.js";
 import { policyOptions } from "./policyMenu.js";
 import { CONTROLS, QUEST_MARKER, BUILD_MARKER } from "./a11y.js";
 import { WorldAudio } from "../ui/audio.js";
@@ -94,6 +95,10 @@ const POLICY_H = 248;
 // Neighbours (rivals roster) panel geometry.
 const NEIGHBOURS_W = 452;
 const NEIGHBOURS_H = 196;
+
+// Settlements (your tribe's camps) panel geometry.
+const SETTLEMENTS_W = 452;
+const SETTLEMENTS_H = 156;
 
 /** One full dawn→day→dusk→night→dawn loop, in render time (sim stays paused). */
 const DAY_LENGTH_MS = 90_000;
@@ -414,6 +419,14 @@ export class WorldScene extends Phaser.Scene {
   private neighboursBody!: Phaser.GameObjects.Text;
   private neighboursOpen = false;
 
+  // Settlements roster (C): a read-only panel onto the sim's dormant
+  // settlements[] — the tribe's home camp (and any founded outpost), with each
+  // seat's biome, living numbers, shelter tier, food larder and labour split.
+  // It tracks the camps as the sim drifts them (population, stores).
+  private settlementsPanel!: Phaser.GameObjects.Container;
+  private settlementsBody!: Phaser.GameObjects.Text;
+  private settlementsOpen = false;
+
   // Interactive camp defence: a hostile party marches on the camp; the chieftain
   // rallies villagers during a short window, then the raid resolves on the sim's
   // own skirmish math (see ./raidDefense).
@@ -469,6 +482,7 @@ export class WorldScene extends Phaser.Scene {
     this.buildTechPanel();
     this.buildPolicyPanel();
     this.buildNeighboursPanel();
+    this.buildSettlementsPanel();
     this.buildInspectCard();
     this.buildHelpOverlay();
     this.buildSaveBar();
@@ -569,6 +583,10 @@ export class WorldScene extends Phaser.Scene {
           this.closeNeighboursPanel(); // read-only roster — any click dismisses it
           return;
         }
+        if (this.settlementsOpen) {
+          this.closeSettlementsPanel(); // read-only roster — any click dismisses it
+          return;
+        }
         if (currentlyOver.some((o) => o.getData("totem"))) {
           this.openTechPanel();
           return;
@@ -607,6 +625,7 @@ export class WorldScene extends Phaser.Scene {
       else if (this.techPanelOpen) this.closeTechPanel();
       else if (this.policyPanelOpen) this.closePolicyPanel();
       else if (this.neighboursOpen) this.closeNeighboursPanel();
+      else if (this.settlementsOpen) this.closeSettlementsPanel();
       else if (this.inspectOpen) this.closeInspect();
       else this.cancelBuild();
     });
@@ -614,6 +633,7 @@ export class WorldScene extends Phaser.Scene {
     this.input.keyboard!.on("keydown-T", () => this.toggleTechPanel());
     this.input.keyboard!.on("keydown-P", () => this.togglePolicyPanel());
     this.input.keyboard!.on("keydown-N", () => this.toggleNeighboursPanel());
+    this.input.keyboard!.on("keydown-C", () => this.toggleSettlementsPanel());
     this.input.keyboard!.on("keydown-M", () => this.toggleMute());
     this.input.keyboard!.on("keydown-H", () => this.toggleHelp());
     this.input.keyboard!.on("keydown-E", () => this.interact()); // talk to a nearby villager
@@ -1039,7 +1059,7 @@ export class WorldScene extends Phaser.Scene {
       .setVisible(false);
 
     this.add
-      .text(VIEW_W / 2, 28, "WASD move · E talk · Space gather · 1/2/3 build + Enter · R ritual · G gift · F rally · L quests · T research · M sound · ? help", {
+      .text(VIEW_W / 2, 28, "WASD move · E talk · Space gather · 1/2/3 build + Enter · R ritual · G gift · F rally · L quests · T research · C camps · M sound · ? help", {
         fontFamily: "monospace",
         fontSize: "10px",
         color: "#cfe0d0",
@@ -2064,6 +2084,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.dialogOpen) this.closeDialog();
     if (this.policyPanelOpen) this.closePolicyPanel();
     if (this.neighboursOpen) this.closeNeighboursPanel();
+    if (this.settlementsOpen) this.closeSettlementsPanel();
     this.cancelBuild();
     this.techPanelOpen = true;
     this.techPanel.setVisible(true);
@@ -2208,6 +2229,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.dialogOpen) this.closeDialog();
     if (this.techPanelOpen) this.closeTechPanel();
     if (this.neighboursOpen) this.closeNeighboursPanel();
+    if (this.settlementsOpen) this.closeSettlementsPanel();
     this.cancelBuild();
     this.policyPanelOpen = true;
     this.policyPanel.setVisible(true);
@@ -2329,6 +2351,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.dialogOpen) this.closeDialog();
     if (this.techPanelOpen) this.closeTechPanel();
     if (this.policyPanelOpen) this.closePolicyPanel();
+    if (this.settlementsOpen) this.closeSettlementsPanel();
     this.cancelBuild();
     this.neighboursOpen = true;
     this.neighboursPanel.setVisible(true);
@@ -2351,6 +2374,76 @@ export class WorldScene extends Phaser.Scene {
     }
     const lines = rivals.map((r) => neighbourRosterLine(r, () => rivalRegion(r).name));
     this.neighboursBody.setText(lines.join("\n"));
+  }
+
+  // ── settlements (your tribe's camps) ─────────────────────────────────────────
+
+  /** Static frame for the read-only Settlements roster; the body text is refreshed
+   *  from the live sim while the panel is open. */
+  private buildSettlementsPanel(): void {
+    const w = SETTLEMENTS_W;
+    const h = SETTLEMENTS_H;
+    const panel = this.add.rectangle(0, 0, w, h, 0x12180f, 0.95).setStrokeStyle(2, 0x9fb86a);
+    const title = this.add
+      .text(-w / 2 + 14, -h / 2 + 9, "Settlements — your tribe's camps (C)", {
+        fontFamily: "monospace",
+        fontSize: "14px",
+        color: "#bfe08a",
+        fontStyle: "bold",
+      })
+      .setOrigin(0, 0);
+    this.settlementsBody = this.add
+      .text(-w / 2 + 14, -h / 2 + 32, "", {
+        fontFamily: "monospace",
+        fontSize: "11px",
+        color: "#e9e0c8",
+        wordWrap: { width: w - 28 },
+        lineSpacing: 4,
+      })
+      .setOrigin(0, 0);
+    const hint = this.add
+      .text(w / 2 - 12, h / 2 - 10, "C or Esc to close", {
+        fontFamily: "monospace",
+        fontSize: "10px",
+        color: "#8a9a6a",
+      })
+      .setOrigin(1, 1);
+    this.settlementsPanel = this.add
+      .container(VIEW_W / 2, VIEW_H / 2 - 4, [panel, title, this.settlementsBody, hint])
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH + 1)
+      .setVisible(false);
+  }
+
+  private toggleSettlementsPanel(): void {
+    if (this.settlementsOpen) this.closeSettlementsPanel();
+    else this.openSettlementsPanel();
+  }
+
+  private openSettlementsPanel(): void {
+    if (this.dialogOpen) this.closeDialog();
+    if (this.techPanelOpen) this.closeTechPanel();
+    if (this.policyPanelOpen) this.closePolicyPanel();
+    if (this.neighboursOpen) this.closeNeighboursPanel();
+    this.cancelBuild();
+    this.settlementsOpen = true;
+    this.settlementsPanel.setVisible(true);
+    this.refreshSettlementsPanel();
+  }
+
+  private closeSettlementsPanel(): void {
+    this.settlementsOpen = false;
+    this.settlementsPanel.setVisible(false);
+  }
+
+  /** Redraw the roster from the sim's live settlements[]: the home camp first,
+   *  then any founded outpost. Read-only — surfaces where the tribe lives, its
+   *  numbers, shelter, larder and labour split, none of which the HUD shows. */
+  private refreshSettlementsPanel(): void {
+    const lines = this.ctrl.sim.state.settlements.map((st, i) =>
+      settlementRosterLine(st, i === 0),
+    );
+    this.settlementsBody.setText(lines.join("\n"));
   }
 
   /** Spend food to pour insight into the current target; reflect any discovery. */
@@ -3213,6 +3306,9 @@ export class WorldScene extends Phaser.Scene {
     // Keep the Neighbours roster live: the sim drifts rivals (numbers, might,
     // mood) every tick, so reflect that while the panel is open.
     if (this.neighboursOpen) this.refreshNeighboursPanel();
+    // Keep the Settlements roster live: the economy ticks drain/refill each
+    // camp's larder and births/deaths shift its numbers while the panel is open.
+    if (this.settlementsOpen) this.refreshSettlementsPanel();
   }
 
   // ── leaders & notables ───────────────────────────────────────────────────
