@@ -18,7 +18,7 @@ import { buildDialogue, type DialogNode } from "./dialogue.js";
 import { buildRaidSides, resolveRaid } from "./raidDefense.js";
 import { outbreakRisk } from "./epidemicRisk.js";
 import { isPointVisible } from "./cull.js";
-import { BURST_STYLE, questCelebrationCount } from "./feedback.js";
+import { BURST_STYLE, questCelebrationCount, raidCelebrationCount } from "./feedback.js";
 import {
   TUTORIAL_STEPS,
   advanceTutorial,
@@ -2655,7 +2655,12 @@ export class WorldScene extends Phaser.Scene {
     }
 
     this.cameras.main.shake(260, 0.006);
-    this.popParticles(CAMP.x, CAMP.y - 6, outcome.won ? 0x9fe070 : 0xff6a4a);
+    this.popParticles(
+      CAMP.x,
+      CAMP.y - 6,
+      outcome.won ? 0x9fe070 : 0xff6a4a,
+      raidCelebrationCount(outcome.won, defenders),
+    );
     this.audio.raidResolve(outcome.won);
     this.flash(
       outcome.won

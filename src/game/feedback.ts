@@ -38,6 +38,21 @@ export function questCelebrationCount(rewardAmount: number): number {
 }
 
 /**
+ * How many particles a resolved raid throws at the hearth. A victory swells with
+ * the size of the band that held the line — every villager the player rallied
+ * adds a particle — so a hard-won defence pops bigger, directly rewarding the
+ * rally effort. A breach is a small, subdued puff: the camp is reeling. Both
+ * stay within the scene's tasteful cap so a long defence never floods the scene.
+ *
+ * @param defenders total defenders (the chieftain plus rallied villagers, so
+ *                  the bonus is one particle per villager mustered).
+ */
+export function raidCelebrationCount(won: boolean, defenders: number): number {
+  if (!won) return 5;
+  return Math.min(14, 8 + Math.max(0, defenders - 1));
+}
+
+/**
  * Route a logged sim event to the burst it deserves, or null when it earns no
  * extra juice. Births and deaths are not log events — the scene derives those
  * from the `totals` counters — so they are not handled here.
