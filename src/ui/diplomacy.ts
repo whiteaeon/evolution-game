@@ -57,7 +57,7 @@ export function diplomacyPanelHTML(
           <span class="rival-name">${r.name}</span>
           <span class="rival-where">${regionName(r.homeRegion)}</span>
         </div>
-        <div class="rival-rel">
+        <div class="rival-rel" title="Relations — the standing you've built through diplomacy, from −1 to +1">
           <span class="rival-rel-bar"><i style="width:${relPct}%"></i></span>
           <span class="rival-rel-v">${r.relations.toFixed(2)}</span>
         </div>

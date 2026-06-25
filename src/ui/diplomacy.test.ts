@@ -56,6 +56,11 @@ describe("diplomacyPanelHTML", () => {
     expect(html).toContain('data-disp="hostile"');
   });
 
+  it("labels the relations bar with a tooltip so the bare score reads as relations", () => {
+    const html = diplomacyPanelHTML([rival({ relations: -0.4 })], regionName, null);
+    expect(html).toContain('title="Relations — the standing you\'ve built through diplomacy, from −1 to +1"');
+  });
+
   it("exposes the disposition icon to screen readers as an aria-labelled image", () => {
     const html = diplomacyPanelHTML([rival({ disposition: -0.8 })], regionName, null);
     expect(html).toContain('role="img"');
