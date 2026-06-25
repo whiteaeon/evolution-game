@@ -125,6 +125,18 @@ export function rallyBurstCount(rallied: number): number {
 }
 
 /**
+ * The note that floats off the Study button when a research session is funded at
+ * the totem: the food spent and the insight gained. Research is the one resource
+ * transaction that happens behind a full-screen panel, so its payoff earns a
+ * screen-space floating confirmation (mirroring the world floatGain every other
+ * action pops) rather than a particle burst the panel would hide. Uses the same
+ * −/→ glyphs as the Study button label so the spend reads consistently.
+ */
+export function studyFloatText(food: number, points: number): string {
+  return `−${food} food → +${points} insight`;
+}
+
+/**
  * Route a logged sim event to the burst it deserves, or null when it earns no
  * extra juice. Births and deaths are not log events — the scene derives those
  * from the `totals` counters — so they are not handled here.
