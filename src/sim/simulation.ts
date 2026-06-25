@@ -5,6 +5,7 @@ import { selectLeader, leaderBonus } from "./leadership.js";
 import { pickDialogueLine, type DialogueSituation } from "./dialogue.js";
 import { Knowledge, TECH_TREE, TECH_ORDER, eraCapstone } from "./knowledge.js";
 import { Culture } from "./culture.js";
+import { Policies } from "./policies.js";
 import {
   BIOME_PROFILE,
   DEFAULT_REGION,
@@ -302,6 +303,8 @@ export interface SimState {
   knowledge: Knowledge;
   /** Cumulative belief track, parallel to the language chain (see {@link Culture}). */
   culture: Culture;
+  /** Standing governing policies with trade-offs (see {@link Policies}). */
+  policies: Policies;
   world: WorldState;
   shelter: Shelter;
   region: string;
@@ -422,6 +425,7 @@ export class Simulation {
       resources,
       knowledge,
       culture: new Culture(),
+      policies: new Policies(),
       world: { cold: this.config.baseCold, abundance: 1, season: 0, seasonIndex: 0 },
       shelter: "cave",
       region: region.id,
@@ -495,6 +499,11 @@ export class Simulation {
 
   setResearchTarget(tech: TechId | null): void {
     this.state.researchTarget = tech;
+  }
+
+  /** Adopt a standing policy stance on a governing axis (see {@link Policies}). */
+  setPolicy(axisId: string, stanceId: string): void {
+    this.state.policies.set(axisId, stanceId);
   }
 
   /** Dedicate up to `count` of the tribe's idle labour to scouting the map. */
@@ -734,6 +743,7 @@ export class Simulation {
 
     const effects = s.knowledge.aggregateEffects();
     s.culture.foldInto(effects); // belief cohesion, aggregated into the same bundle
+    s.policies.foldInto(effects); // standing policy trade-offs, same bundle
     this.applyLeaderBonus(effects);
     this.updateWorld(effects);
     this.distributeWorkers();
@@ -1582,7 +1592,14 @@ export class Simulation {
     cold: number,
     cookingActive: boolean,
   ): { weights: number[]; total: number } {
-    const weights = pool.map((m) => this.fitness(m, e, b, cold, cookingActive));
+    // Standing social policy can sharpen (>1) or flatten (<1) individual selection
+    // by raising each fitness weight to a pressure exponent. The balanced default is
+    // 1, leaving the weights — and the run — exactly as before.
+    const pressure = this.state.policies.selectionPressure();
+    const weights = pool.map((m) => {
+      const f = this.fitness(m, e, b, cold, cookingActive);
+      return pressure === 1 ? f : Math.pow(f, pressure);
+    });
     let total = 0;
     for (const w of weights) total += w;
     return { weights, total };
@@ -1978,7 +1995,7 @@ export class Simulation {
       settlementRng: this.settlementRng.getState(),
       nextId: this.nextId,
       allocation: this.allocation,
-      state: { ...this.state, knowledge: this.state.knowledge.serialize(), culture: this.state.culture.serialize(), settlements },
+      state: { ...this.state, knowledge: this.state.knowledge.serialize(), culture: this.state.culture.serialize(), policies: this.state.policies.serialize(), settlements },
     });
   }
 
@@ -1995,6 +2012,7 @@ export class Simulation {
       ...data.state,
       knowledge: Knowledge.deserialize(data.state.knowledge),
       culture: Culture.deserialize(data.state.culture),
+      policies: Policies.deserialize(data.state.policies),
     };
     if (!sim.state.rivals) sim.state.rivals = [];
     if (!sim.state.discoveredRegions) sim.state.discoveredRegions = [sim.state.region];

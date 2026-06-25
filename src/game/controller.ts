@@ -84,6 +84,10 @@ export class GameController {
   resolveChoice(option: number): void {
     this.sim.resolveChoice(option);
   }
+  /** Adopt a standing policy stance on a governing axis. */
+  setPolicy(axisId: string, stanceId: string): void {
+    this.sim.setPolicy(axisId, stanceId);
+  }
 
   update(dtMs: number): void {
     this.syncAchievements();

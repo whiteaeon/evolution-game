@@ -7,6 +7,7 @@ import {
   DIFFICULTIES,
   DIFFICULTY_PRESETS,
   QUEST_DEFS,
+  POLICY_AXES,
   regionById,
   type Difficulty,
   type Era,
@@ -200,6 +201,11 @@ export class UIOverlay {
       </div>
 
       <div class="panel">
+        <h2>Policies <span class="dim">(standing customs, each a trade-off)</span></h2>
+        <div class="policies" data-el="policies"></div>
+      </div>
+
+      <div class="panel">
         <h2>Tech tree <span class="dim">(click an available tech to research)</span></h2>
         <div class="techtree" data-el="techtree"></div>
       </div>
@@ -283,7 +289,7 @@ export class UIOverlay {
     const q = (sel: string) => this.root.querySelector(sel) as HTMLElement;
     for (const k of [
       "era", "year", "gen", "pop", "season", "goal", "goal-text", "eratrack", "resources", "legacy", "difficulty",
-      "traits", "graph", "labor", "tasks", "lang", "techtree", "badges", "ach-count",
+      "traits", "graph", "labor", "tasks", "lang", "policies", "techtree", "badges", "ach-count",
       "quests", "quest-count", "rivals", "rival-count", "codex", "codex-count", "log",
       "encounter", "encounter-text", "choice", "choice-title", "choice-text",
       "endscreen", "end-title", "end-body", "end-summary", "end-card", "tutorial",
@@ -301,6 +307,19 @@ export class UIOverlay {
       (t) => `<div class="task"><span class="kname">${TASK_LABEL[t]}</span>
         <button data-task-dec="${t}">−</button><b data-task-n="${t}">0</b><button data-task-inc="${t}">+</button>
         <span class="hint" data-task-hint="${t}"></span></div>`,
+    ).join("");
+
+    this.el.policies.innerHTML = POLICY_AXES.map(
+      (axis) => `<div class="policy-axis">
+        <div class="paxis-name" title="${axis.blurb}">${axis.name}</div>
+        <div class="pstances">${axis.stances
+          .map(
+            (st) =>
+              `<button data-policy-axis="${axis.id}" data-policy-stance="${st.id}" title="${st.blurb}">${st.name}</button>`,
+          )
+          .join("")}</div>
+        <div class="pblurb" data-policy-blurb="${axis.id}"></div>
+      </div>`,
     ).join("");
 
     this.el.eratrack.innerHTML = ERAS.map(
@@ -333,6 +352,8 @@ export class UIOverlay {
       if (btn.dataset.speed) this.applySpeed(Number(btn.dataset.speed));
       if (btn.dataset.taskInc) this.ctrl.adjustTask(btn.dataset.taskInc as Task, +1);
       if (btn.dataset.taskDec) this.ctrl.adjustTask(btn.dataset.taskDec as Task, -1);
+      if (btn.dataset.policyAxis && btn.dataset.policyStance)
+        this.ctrl.setPolicy(btn.dataset.policyAxis, btn.dataset.policyStance);
       if (a === "sound") btn.textContent = this.audio.toggle() ? "🔊" : "🔇";
       if (a === "save") { this.ctrl.save(); this.flash(btn, "Saved!"); }
       if (a === "load") { if (this.ctrl.load()) this.flash(btn, "Loaded!"); }
@@ -427,6 +448,18 @@ export class UIOverlay {
       const need = TASK_TECH[t];
       (this.root.querySelector(`[data-task-hint="${t}"]`) as HTMLElement).textContent =
         need && !s.knowledge.has(need) ? `needs ${TECH_TREE[need].name}` : "";
+    }
+
+    // policies: highlight each axis's chosen stance and show its trade-off
+    for (const axis of POLICY_AXES) {
+      const chosen = s.policies.stanceOf(axis.id);
+      this.root
+        .querySelectorAll(`[data-policy-axis="${axis.id}"]`)
+        .forEach((b) =>
+          b.classList.toggle("on", (b as HTMLElement).dataset.policyStance === chosen.id),
+        );
+      (this.root.querySelector(`[data-policy-blurb="${axis.id}"]`) as HTMLElement).textContent =
+        chosen.id === axis.stances[0].id ? "" : chosen.blurb;
     }
 
     // language chain
