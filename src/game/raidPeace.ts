@@ -26,3 +26,13 @@ export const RAID_PEACE_RELATIONS = 0.5;
 export function raidPressed(relations: number): boolean {
   return relations < RAID_PEACE_RELATIONS;
 }
+
+/**
+ * A player-facing peace/threat tag for the neighbour camp banner, derived from
+ * the same {@link raidPressed} rule the raid loop uses. Lets the player read off
+ * the camp whether their gifts have warmed relations into the friendly band that
+ * stays the neighbour's hand — not only at the instant a raid is called off.
+ */
+export function raidThreatLabel(relations: number): string {
+  return raidPressed(relations) ? "⚔ may raid" : "🕊 at peace";
+}
