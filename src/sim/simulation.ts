@@ -1,5 +1,6 @@
 import { RNG } from "./rng.js";
 import { clamp01, inherit, randomGenome } from "./genome.js";
+import { pickDialogueLine, type DialogueSituation } from "./dialogue.js";
 import { Knowledge, TECH_TREE, TECH_ORDER, eraCapstone } from "./knowledge.js";
 import {
   BIOME_PROFILE,
@@ -454,8 +455,11 @@ export class Simulation {
     this.distributeWorkers();
     this.produce(effects);
     this.consumeAndUpdateNeeds(effects);
+    const popBeforeDeaths = this.living.length;
     this.ageAndDie(effects);
     this.maybeEvent(effects);
+    // A notable loss: several of the tribe fell in a single year — they grieve.
+    if (popBeforeDeaths - this.living.length >= 2) this.emitDialogue("death");
     this.maybeEncounter();
     this.maybeEventChain();
     this.reproduce(effects);
@@ -705,6 +709,7 @@ export class Simulation {
       expiresTick: s.tick + 6,
     };
     this.logEvent("encounter", s.pendingEncounter.message);
+    this.emitDialogue("encounter");
   }
 
   /** Resolve a pending encounter. Accepting injects new, archetype-leaning kin. */
@@ -762,6 +767,7 @@ export class Simulation {
     s.pendingChoice = { id, ...EVENT_CHAIN_DEF[id], expiresTick: s.tick + 6 };
     if (!s.totals.eventChainsSeen.includes(id)) s.totals.eventChainsSeen.push(id);
     this.logEvent("choice", s.pendingChoice.message);
+    this.emitDialogue("eventChain");
   }
 
   /** Which event chains the current world state can offer right now. */
@@ -1016,7 +1022,8 @@ export class Simulation {
     const s = this.state;
     const era = s.knowledge.currentEra();
     if (era !== s.era && !s.won) {
-      // era change logged via the capstone discovery already
+      // The capstone discovery already logs the era change; the tribe reacts.
+      this.emitDialogue("eraChange");
     }
     s.era = era;
     if (era === "Information" && !s.won) {
@@ -1026,6 +1033,8 @@ export class Simulation {
 
     let maxGen = 0;
     for (const ind of this.living) if (ind.generation > maxGen) maxGen = ind.generation;
+    // A notable birth: the first of a new generation has come of age.
+    if (maxGen > s.generation) this.emitDialogue("birth");
     s.generation = maxGen;
 
     s.goal = this.computeGoal();
@@ -1073,6 +1082,15 @@ export class Simulation {
   protected logEvent(type: SimEventType, message: string): void {
     this.state.log.push({ type, tick: this.state.tick, message });
     if (this.state.log.length > 60) this.state.log.shift();
+  }
+
+  /**
+   * Surface one flavor line for a situation into the log — the tribe's voice. The
+   * pick is seeded by the current tick (not the sim RNG), so it is deterministic
+   * and replayable yet never perturbs the simulation's random stream or balance.
+   */
+  private emitDialogue(situation: DialogueSituation): void {
+    this.logEvent("dialogue", `“${pickDialogueLine(situation, this.state.tick)}”`);
   }
 
   // ── save / load ──────────────────────────────────────────────────────────

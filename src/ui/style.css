@@ -225,6 +225,7 @@ button.big { font-weight: 700; padding: 7px 14px; }
 .ev-disease { color: #a8e0a0; }
 .ev-predator, .ev-coldSnap, .ev-raid { color: var(--bad); }
 .ev-encounter { color: #c9b3ff; }
+.ev-dialogue { color: #d8c8a8; font-style: italic; }
 
 /* modals + tutorial */
 .modal, .tutorial {

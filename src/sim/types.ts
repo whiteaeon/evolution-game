@@ -205,7 +205,8 @@ export type SimEventType =
   | "discovery"
   | "milestone"
   | "encounter"
-  | "choice";
+  | "choice"
+  | "dialogue";
 
 export interface SimEvent {
   type: SimEventType;
