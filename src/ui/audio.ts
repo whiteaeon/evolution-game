@@ -389,6 +389,16 @@ export class WorldAudio {
     this.tone({ freq: base, to: base * 1.5, dur: 0.18, gain: 0.06, type: "triangle" });
   }
 
+  /**
+   * A soft, low downward sigh as a node is exhausted and wilts away — the
+   * inverse of {@link gather}'s crisp rising tock, so the final swing that
+   * clears a node sounds distinctly spent rather than like one more hit.
+   */
+  nodeDepleted(kind: "wood" | "food" | "stone"): void {
+    const base = { wood: 220, food: 330, stone: 165 }[kind];
+    this.tone({ freq: base, to: base * 0.5, dur: 0.34, gain: 0.05, type: "sine" });
+  }
+
   /** A solid "thunk" on a successful action, a short low buzz on a refusal. */
   build(ok: boolean): void {
     this.tone({

@@ -2394,6 +2394,7 @@ export class WorldScene extends Phaser.Scene {
       if (this.gatherTarget === node) this.gatherTarget = null; // target gone; re-aim next frame
       node.sprite.clearTint(); // drop the highlight before the wilt tween plays
       this.popParticles(px, py, RES_COLOR[node.kind]);
+      this.audio.nodeDepleted(node.kind); // a spent-node sigh, distinct from the swing tock
       this.tweens.add({
         targets: spr,
         alpha: 0,

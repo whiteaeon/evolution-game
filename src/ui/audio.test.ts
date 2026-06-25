@@ -53,6 +53,9 @@ describe("WorldAudio", () => {
       a.footstep();
       a.gather("wood");
       a.gather("stone");
+      a.nodeDepleted("wood");
+      a.nodeDepleted("food");
+      a.nodeDepleted("stone");
       a.build(true);
       a.build(false);
       a.questAccept();
