@@ -47,3 +47,19 @@ export function policyOptions(policies: Policies): PolicyOption[] {
   }
   return out;
 }
+
+/**
+ * Describe the tribe's net evolutionary selection pressure — the product of every
+ * chosen stance's {@link PolicyStance.selectionPressure} (see
+ * {@link Policies.selectionPressure}). This is the one policy lever no effects
+ * readout shows: >1 sharpens individual selection (the able breed truer), <1
+ * flattens it (the weak are carried), 1 is the neutral default. Returns null when
+ * neutral so the council header only spends a line on it when a custom bends it.
+ */
+export function selectionPressureLabel(pressure: number): string | null {
+  const pct = Math.round(Math.abs(1 - pressure) * 100);
+  if (pct === 0) return null;
+  return pressure > 1
+    ? `⚖ Selection sharpened +${pct}% — the able breed truer`
+    : `⚖ Selection gentler −${pct}% — the weak are carried`;
+}

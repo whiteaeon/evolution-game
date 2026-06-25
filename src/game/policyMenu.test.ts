@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Policies, POLICY_AXES } from "../sim/policies.js";
-import { policyOptions } from "./policyMenu.js";
+import { policyOptions, selectionPressureLabel } from "./policyMenu.js";
 
 describe("policyMenu — council panel view-model", () => {
   it("lists every stance of every axis as a contiguously-numbered option", () => {
@@ -36,5 +36,37 @@ describe("policyMenu — council panel view-model", () => {
     const starts = opts.filter((o) => o.axisStart);
     expect(starts).toHaveLength(POLICY_AXES.length);
     expect(starts.map((o) => o.axisId)).toEqual(POLICY_AXES.map((a) => a.id));
+  });
+});
+
+describe("selectionPressureLabel — net selection-pressure readout", () => {
+  it("returns null at the neutral default, so the header spends no line on it", () => {
+    expect(selectionPressureLabel(new Policies().selectionPressure())).toBeNull();
+    expect(selectionPressureLabel(1)).toBeNull();
+  });
+
+  it("reports a sharpened selection (>1) with the deviation as a percentage", () => {
+    const policies = new Policies();
+    policies.set("social", "competitive"); // selectionPressure 1.3
+    const label = selectionPressureLabel(policies.selectionPressure());
+    expect(label).toContain("sharpened");
+    expect(label).toContain("+30%");
+  });
+
+  it("reports a gentler selection (<1) with the deviation as a percentage", () => {
+    const policies = new Policies();
+    policies.set("social", "communal"); // selectionPressure 0.85
+    const label = selectionPressureLabel(policies.selectionPressure());
+    expect(label).toContain("gentler");
+    expect(label).toContain("−15%"); // U+2212 minus, matching the readout
+  });
+
+  it("tracks the product of stances across axes the player adopts", () => {
+    const policies = new Policies();
+    policies.set("social", "competitive"); // 1.3; the settlement axis stays neutral (1)
+    // The label reflects selectionPressure()'s product, not a single stance.
+    expect(selectionPressureLabel(policies.selectionPressure())).toBe(
+      selectionPressureLabel(1.3),
+    );
   });
 });

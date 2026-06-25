@@ -52,7 +52,7 @@ import {
 import { dispositionStyle, neighbourRosterLine } from "../ui/diplomacy.js";
 import { settlementRosterLine } from "../ui/settlements.js";
 import { climateReadout } from "../ui/climate.js";
-import { policyOptions } from "./policyMenu.js";
+import { policyOptions, selectionPressureLabel } from "./policyMenu.js";
 import { CONTROLS, QUEST_MARKER, QUEST_MARKER_LEGEND, BUILD_MARKER, movementLocked } from "./a11y.js";
 import { WorldAudio } from "../ui/audio.js";
 import type { GameController } from "./controller.js";
@@ -2318,10 +2318,16 @@ export class WorldScene extends Phaser.Scene {
   private refreshPolicyPanel(): void {
     const policies = this.ctrl.sim.state.policies;
     const active = policies.active();
-    const head =
+    let head =
       active.length === 0
         ? "No standing custom — the tribe lives by no fixed rule. Adopt a stance on each axis; every choice is a trade-off the whole tribe lives by."
         : `Customs in force: ${active.map((s) => s.name).join(", ")}.`;
+    // Surface the policies' net evolutionary selection pressure — the one live sim
+    // lever (folded into parent selection) that no other readout shows. Only when a
+    // custom bends it off neutral, so the neutral default keeps the header to two
+    // lines and never crowds the stance rows below.
+    const pressureLine = selectionPressureLabel(this.ctrl.sim.state.policies.selectionPressure());
+    if (pressureLine) head += `\n${pressureLine}`;
     this.policyPanelBody.setText(head);
 
     this.policyRows.forEach((r) => r.destroy());
