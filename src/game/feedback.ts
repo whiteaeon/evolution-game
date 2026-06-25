@@ -28,6 +28,16 @@ export const BURST_STYLE: Record<FeedbackKind, BurstStyle> = {
 };
 
 /**
+ * How many celebration particles a completed quest turn-in earns: the baseline
+ * quest burst, swelled a little by the size of the payout so a fat reward pops
+ * fatter — clamped to stay tasteful and cheap (never more than the scene's cap).
+ */
+export function questCelebrationCount(rewardAmount: number): number {
+  const bonus = Math.max(0, Math.floor(rewardAmount / 4));
+  return Math.min(14, BURST_STYLE.quest.count + bonus);
+}
+
+/**
  * Route a logged sim event to the burst it deserves, or null when it earns no
  * extra juice. Births and deaths are not log events — the scene derives those
  * from the `totals` counters — so they are not handled here.
