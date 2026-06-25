@@ -365,8 +365,31 @@ export class Knowledge {
     return null;
   }
 
-  /** Aggregate every discovered tech's effects into one resolved bundle. */
+  /**
+   * Memoized aggregate, with the {@link discovered} size it was computed at.
+   * Techs are only ever added (never removed), so the set's size is a monotonic,
+   * unique key for its contents — a cheap O(1) staleness check that also catches
+   * direct `discovered.add(...)`, not just completions via {@link addProgress}.
+   */
+  private effectsCache: Required<TechEffects> | null = null;
+  private effectsCacheSize = -1;
+
+  /**
+   * Aggregate every discovered tech's effects into one resolved bundle. This runs
+   * every tick but only changes when a tech is discovered, so the loop's result is
+   * memoized and recomputed only when {@link discovered} grows. A fresh copy is
+   * returned each call so callers (which fold culture/policy/leader bonuses into
+   * it) can mutate it freely without poisoning the cache.
+   */
   aggregateEffects(): Required<TechEffects> {
+    if (this.effectsCache === null || this.effectsCacheSize !== this.discovered.size) {
+      this.effectsCache = this.computeEffects();
+      this.effectsCacheSize = this.discovered.size;
+    }
+    return { ...this.effectsCache };
+  }
+
+  private computeEffects(): Required<TechEffects> {
     const e: Required<TechEffects> = {
       gatherMult: 1, huntMult: 1, foodMult: 1, buildMult: 1, researchMult: 1, birthMult: 1,
       defenseMult: 1, diseaseDefense: 0, warmth: 0, capacityBonus: 0, intelPressure: 0, abundance: 0,
