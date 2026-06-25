@@ -31,7 +31,7 @@ import { npcOnScreen } from "./npcCull.js";
 import { particleBudget } from "./particleBudget.js";
 import { footstepDust } from "./footstepDust.js";
 import { nightGlowAlpha } from "./nightGlow.js";
-import { removeSolid, type Solid } from "./solids.js";
+import { isBlocked, removeSolid, type Solid } from "./solids.js";
 import { acceptCelebrationCount, BURST_STYLE, dustBurstCount, gatherBurstCount, questCelebrationCount, questRingScale, raidCelebrationCount, rallyBurstCount, studyFloatText } from "./feedback.js";
 import {
   TUTORIAL_STEPS,
@@ -2648,7 +2648,7 @@ export class WorldScene extends Phaser.Scene {
 
   private blocked(x: number, y: number): boolean {
     const r = 7; // player half-width at the feet
-    return this.solids.some((s) => Phaser.Math.Distance.Between(x, y, s.x, s.y) < s.r + r);
+    return isBlocked(x, y, this.solids, r);
   }
 
   // ── gathering ────────────────────────────────────────────────────────────
