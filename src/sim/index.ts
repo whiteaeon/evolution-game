@@ -2,6 +2,7 @@ export * from "./types.js";
 export * from "./rng.js";
 export * from "./genome.js";
 export * from "./naming.js";
+export * from "./leadership.js";
 export * from "./knowledge.js";
 export * from "./regions.js";
 export * from "./rivals.js";

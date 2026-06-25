@@ -1,5 +1,7 @@
 import { RNG } from "./rng.js";
 import { clamp01, inherit, randomGenome } from "./genome.js";
+import { individualName } from "./naming.js";
+import { selectLeader, leaderBonus } from "./leadership.js";
 import { pickDialogueLine, type DialogueSituation } from "./dialogue.js";
 import { Knowledge, TECH_TREE, TECH_ORDER, eraCapstone } from "./knowledge.js";
 import {
@@ -301,6 +303,12 @@ export interface SimState {
   generation: number;
   /** Win: the tribe has become modern humans. */
   won: boolean;
+  /**
+   * The tribe's current leader (a living individual's id), or null before one is
+   * chosen / when the tribe is empty. Their dominant trait grants a tribe-wide
+   * bonus; on their death a succession picks the next (see {@link Simulation.leader}).
+   */
+  leaderId: number | null;
   cookingActive: boolean;
   log: SimEvent[];
   researchTarget: TechId | null;
@@ -413,6 +421,7 @@ export class Simulation {
       era: "Paleolithic",
       generation: 0,
       won: false,
+      leaderId: null,
       cookingActive: false,
       log: [],
       researchTarget: knowledge.available()[0] ?? null,
@@ -669,6 +678,46 @@ export class Simulation {
     return { count: living.length, traits };
   }
 
+  // ── leadership ───────────────────────────────────────────────────────────────
+
+  /** The tribe's current leader, if one is alive — for the chronicle/UI. */
+  leader(): Individual | undefined {
+    const id = this.state.leaderId;
+    return id != null ? this.living.find((i) => i.id === id) : undefined;
+  }
+
+  /** Living adults eligible to lead (same threshold used for work + founding). */
+  private eligibleLeaders(): Individual[] {
+    return this.living.filter((i) => i.age >= this.config.reproMinAge - 4 && i.health > 0.15);
+  }
+
+  /**
+   * Keep the standing leader while they live; on their death (or at the first tick
+   * with eligible adults) a succession picks the next — the most capable living
+   * adult. Logged as a milestone so it surfaces in the existing chronicle.
+   */
+  private updateLeader(): void {
+    const s = this.state;
+    if (s.leaderId != null && this.living.some((i) => i.id === s.leaderId)) return;
+    const heir = selectLeader(this.eligibleLeaders());
+    const hadLeader = s.leaderId != null;
+    s.leaderId = heir; // a living eligible adult, or null when none can lead
+    if (heir == null) return;
+    const lead = this.individualById(heir)!;
+    const verb = hadLeader ? "succeeds to lead" : "rises to lead";
+    this.logEvent("milestone", `${individualName(lead)} ${leaderBonus(lead).style} ${verb} the tribe.`);
+  }
+
+  /** Fold the standing leader's trait-driven bonus into this tick's tech effects. */
+  private applyLeaderBonus(e: Required<TechEffects>): void {
+    const leader = this.leader();
+    if (!leader) return;
+    const b = leaderBonus(leader);
+    e.defenseMult *= b.defenseMult;
+    e.researchMult *= b.researchMult;
+    e.foodMult *= b.foodMult;
+  }
+
   // ── main loop ──────────────────────────────────────────────────────────────
 
   tick(): void {
@@ -676,6 +725,7 @@ export class Simulation {
     s.tick++;
 
     const effects = s.knowledge.aggregateEffects();
+    this.applyLeaderBonus(effects);
     this.updateWorld(effects);
     this.distributeWorkers();
     this.produce(effects);
@@ -693,6 +743,10 @@ export class Simulation {
     this.reproduce(effects);
     this.tryUpgradeShelter();
     this.evolveRivals();
+    // Refresh the leader after all of this tick's deaths are resolved, so the role
+    // always points at a living adult (or null); the bonus above used the standing
+    // leader and a succession (if any) is logged here.
+    this.updateLeader();
     this.updateEraAndGeneration();
     s.totals.peakPopulation = Math.max(s.totals.peakPopulation, this.living.length);
     this.evaluateQuests();
