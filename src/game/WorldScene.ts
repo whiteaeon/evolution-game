@@ -12,6 +12,7 @@ import {
 import { HOMININ_WALK, homininFrameKey } from "./homininWalk.js";
 import { chooseNpcActivity, type NpcActivity } from "./npcActivity.js";
 import { pickGatherTarget } from "./gatherTarget.js";
+import { stepGather } from "./gatherCadence.js";
 import { depletionScale } from "./nodeDepletion.js";
 import { questMetric, type QuestMetrics, type QuestSpec } from "./quests.js";
 import { buildDialogue, type DialogNode } from "./dialogue.js";
@@ -2340,7 +2341,6 @@ export class WorldScene extends Phaser.Scene {
   // ── gathering ────────────────────────────────────────────────────────────
 
   private updateGather(dt: number): void {
-    if (this.gatherCooldown > 0) this.gatherCooldown -= dt;
     // Sticky targeting: keep the aimed node steady so the prompt — and the node
     // Space harvests — doesn't flicker between two nearby nodes as the player drifts.
     const prev = this.gatherTarget ? this.gatherables.indexOf(this.gatherTarget) : -1;
@@ -2352,6 +2352,10 @@ export class WorldScene extends Phaser.Scene {
       node?.sprite.setTint(GATHER_HILITE);
       this.gatherTarget = node;
     }
+    // Hold-to-gather: a held Space aimed at a node harvests at a steady cadence,
+    // so the player can sustain a swing rhythm without tapping once per hit.
+    const step = stepGather(this.gatherCooldown, dt, this.gatherKey.isDown && node !== null, GATHER_COOLDOWN_MS);
+    this.gatherCooldown = step.cooldown;
     if (!node) {
       this.gatherPrompt.setVisible(false);
       return;
@@ -2359,11 +2363,11 @@ export class WorldScene extends Phaser.Scene {
     const cam = this.cameras.main;
     const ready = this.gatherCooldown <= 0;
     this.gatherPrompt
-      .setText(ready ? `Space: gather ${node.kind}` : "…")
+      .setText(ready ? `Hold Space: gather ${node.kind}` : "…")
       .setAlpha(ready ? 1 : 0.6)
       .setPosition(node.sprite.x - cam.scrollX, node.sprite.y - cam.scrollY - node.sprite.displayHeight)
       .setVisible(true);
-    if (ready && Phaser.Input.Keyboard.JustDown(this.gatherKey)) this.gather(node);
+    if (step.harvest) this.gather(node);
   }
 
   private gather(node: Gatherable): void {
@@ -2375,8 +2379,7 @@ export class WorldScene extends Phaser.Scene {
     this.gathered[node.kind] += amt;
     if (node.farm) this.farmHarvests += amt; // food taken from a farm the player placed
     node.amount -= 1; // one swing depletes the node by one regardless of yield
-    this.gatherCooldown = GATHER_COOLDOWN_MS;
-    this.tutorialEvent("gather");
+    this.tutorialEvent("gather"); // cooldown is paced by updateGather's stepGather
 
     const spr = node.sprite;
     const px = spr.x;
