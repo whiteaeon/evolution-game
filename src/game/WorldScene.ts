@@ -15,6 +15,7 @@ import { questMetric, type QuestMetrics, type QuestSpec } from "./quests.js";
 import { buildDialogue, type DialogNode } from "./dialogue.js";
 import { buildRaidSides, resolveRaid } from "./raidDefense.js";
 import { outbreakRisk } from "./epidemicRisk.js";
+import { isPointVisible } from "./cull.js";
 import {
   TUTORIAL_STEPS,
   advanceTutorial,
@@ -138,6 +139,8 @@ const RAID_PLUNDER_FOOD = 20; // most food raiders carry off (scaled by how badl
 const RES_COLOR: Record<ResKind, number> = { wood: 0xb5793b, food: 0x6fcf57, stone: 0xc2c6cf };
 /** Floating-gain text colour per resource (a brighter sibling of the particle). */
 const RES_TEXT: Record<ResKind, string> = { wood: "#e0a060", food: "#9fe070", stone: "#d6dae6" };
+/** Slack around the camera before a decorative burst is culled as off-screen. */
+const PARTICLE_CULL_MARGIN = 48;
 
 /** Placeable structures, each with a cost and a perk it grants. */
 interface BuildType {
@@ -1463,6 +1466,7 @@ export class WorldScene extends Phaser.Scene {
 
   /** A low, ground-hugging puff of dust where a structure lands. */
   private dustBurst(x: number, y: number): void {
+    if (!this.onScreen(x, y)) return;
     const n = 12;
     for (let i = 0; i < n; i++) {
       const a = (Math.PI * 2 * i) / n + Math.random() * 0.5;
@@ -2517,8 +2521,18 @@ export class WorldScene extends Phaser.Scene {
     this.raidPrompt.setVisible(false);
   }
 
+  /**
+   * True when a world point is on (or near) screen. Decorative bursts skip
+   * spawning entirely when off-screen, so no sprites or tweens are created for
+   * effects the player can't see (e.g. a raid resolving at camp while they roam).
+   */
+  private onScreen(x: number, y: number): boolean {
+    return isPointVisible(x, y, this.cameras.main.worldView, PARTICLE_CULL_MARGIN);
+  }
+
   /** A small radial burst of fading dots at a world point — the gather "pop". */
   private popParticles(x: number, y: number, color: number): void {
+    if (!this.onScreen(x, y)) return;
     const n = 7;
     for (let i = 0; i < n; i++) {
       const a = (Math.PI * 2 * i) / n + Math.random() * 0.6;
@@ -2541,6 +2555,7 @@ export class WorldScene extends Phaser.Scene {
 
   /** A "+1 wood" that rises off the node and fades — anchored in the world. */
   private floatGain(x: number, y: number, msg: string, color: string): void {
+    if (!this.onScreen(x, y)) return;
     const t = this.add
       .text(x, y, msg, {
         fontFamily: "monospace",
