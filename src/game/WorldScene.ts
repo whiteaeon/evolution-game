@@ -118,6 +118,7 @@ export class WorldScene extends Phaser.Scene {
 
   private buildMode: BuildType | null = null;
   private ghost!: Phaser.GameObjects.Image;
+  private ghostTile!: Phaser.GameObjects.Rectangle; // snapped footprint under the ghost
   private buildBtns: { type: BuildType; bg: Phaser.GameObjects.Rectangle }[] = [];
 
   private solids: { x: number; y: number; r: number }[] = [];
@@ -167,6 +168,13 @@ export class WorldScene extends Phaser.Scene {
     this.buildHud();
     this.buildDialog();
     this.buildBuildBar();
+    // A grid-snapped footprint sits under the ghost so the placement cell — and
+    // whether it is affordable (green) or not (red) — is unmistakable.
+    this.ghostTile = this.add
+      .rectangle(0, 0, TILE, TILE, 0x66ff66, 0.22)
+      .setStrokeStyle(1.5, 0x66ff66, 0.9)
+      .setDepth(FOG_DEPTH - 2)
+      .setVisible(false);
     this.ghost = this.add
       .image(0, 0, "fire-0")
       .setOrigin(0.5, 0.85)
@@ -586,12 +594,14 @@ export class WorldScene extends Phaser.Scene {
     }
     this.buildMode = t;
     this.ghost.setTexture(t.icon).setVisible(true);
+    this.ghostTile.setVisible(true);
     this.highlightBuildBtns();
   }
 
   private cancelBuild(): void {
     this.buildMode = null;
     this.ghost.setVisible(false);
+    this.ghostTile.setVisible(false);
     this.highlightBuildBtns();
   }
 
@@ -608,10 +618,16 @@ export class WorldScene extends Phaser.Scene {
 
   private updateGhost(p: Phaser.Input.Pointer): void {
     if (!this.buildMode) return;
-    this.ghost.setPosition(this.snap(p.worldX), this.snap(p.worldY));
+    const wx = this.snap(p.worldX);
+    const wy = this.snap(p.worldY);
+    this.ghost.setPosition(wx, wy);
+    this.ghostTile.setPosition(wx, wy);
     const cost = this.buildMode.cost;
     const ok = this.ctrl.sim.state.resources[cost.res] >= cost.amount;
-    this.ghost.setTint(ok ? 0x88ff88 : 0xff7a7a);
+    // Green = affordable, red = not. Affordable also reads brighter/solider.
+    const col = ok ? 0x66ff66 : 0xff5a5a;
+    this.ghost.setTint(col).setAlpha(ok ? 0.75 : 0.5);
+    this.ghostTile.setFillStyle(col, 0.22).setStrokeStyle(1.5, col, 0.9);
   }
 
   private tryPlace(p: Phaser.Input.Pointer): void {
@@ -619,7 +635,7 @@ export class WorldScene extends Phaser.Scene {
     if (!t) return;
     const res = this.ctrl.sim.state.resources;
     if (res[t.cost.res] < t.cost.amount) {
-      this.flash(`Not enough ${t.cost.res}`);
+      this.denyBuild(`Not enough ${t.cost.res}`);
       return;
     }
     res[t.cost.res] -= t.cost.amount;
@@ -628,11 +644,13 @@ export class WorldScene extends Phaser.Scene {
     if (t.id === "farm") {
       // A farm is flat ground you walk over — and a renewable food source.
       const crop = this.add.image(wx, wy, "crop").setDepth(2);
+      this.raiseIn(crop);
       this.gatherables.push({ sprite: crop, kind: "food", amount: 12 });
       this.farmsBuilt += 1;
       this.flash("Farm built — Space to harvest food");
     } else {
-      this.add.image(wx, wy, t.icon).setOrigin(0.5, 0.9).setDepth(wy);
+      const spr = this.add.image(wx, wy, t.icon).setOrigin(0.5, 0.9).setDepth(wy);
+      this.raiseIn(spr);
       if (t.id === "hut") {
         this.housing += 1; // shelter for more of the tribe
         this.solids.push({ x: wx, y: wy, r: 10 });
@@ -642,7 +660,92 @@ export class WorldScene extends Phaser.Scene {
         this.flash("Campfire built — warmth");
       }
     }
+    this.dustBurst(wx, wy); // a kick of dust as it lands
+    this.buildSfx(true);
     this.updateGhost(p); // refresh the affordability tint after spending
+  }
+
+  /** Refuse a placement loudly: reason text, a red ghost shake, and a low buzz. */
+  private denyBuild(reason: string): void {
+    this.flash(reason);
+    this.buildSfx(false);
+    const gx = this.ghost.x;
+    this.ghost.setTint(0xff5a5a);
+    this.tweens.add({
+      targets: this.ghost,
+      x: gx + 5,
+      duration: 45,
+      yoyo: true,
+      repeat: 3,
+      ease: "Sine.easeInOut",
+      onComplete: () => this.ghost.setX(gx),
+    });
+  }
+
+  /** A short "raising" pop: the structure rises from a squashed base into place. */
+  private raiseIn(spr: Phaser.GameObjects.Image): void {
+    const sx = spr.scaleX;
+    const sy = spr.scaleY;
+    spr.setScale(sx * 1.15, sy * 0.18).setAlpha(0.5);
+    this.tweens.add({
+      targets: spr,
+      scaleX: sx,
+      scaleY: sy,
+      alpha: 1,
+      duration: 320,
+      ease: "Back.easeOut",
+    });
+  }
+
+  /** A low, ground-hugging puff of dust where a structure lands. */
+  private dustBurst(x: number, y: number): void {
+    const n = 12;
+    for (let i = 0; i < n; i++) {
+      const a = (Math.PI * 2 * i) / n + Math.random() * 0.5;
+      const dist = 14 + Math.random() * 20;
+      const dot = this.add
+        .circle(x, y, Phaser.Math.Between(2, 4), 0xcbb892, 0.9)
+        .setDepth(FOG_DEPTH - 2);
+      this.tweens.add({
+        targets: dot,
+        x: x + Math.cos(a) * dist,
+        y: y + Math.abs(Math.sin(a)) * dist * 0.45 - 2, // hugs the ground, settles down
+        alpha: 0,
+        scale: 0.3,
+        duration: 380 + Math.random() * 180,
+        ease: "Quad.easeOut",
+        onComplete: () => dot.destroy(),
+      });
+    }
+  }
+
+  /** A built/denied cue: a solid "thunk" on success, a short buzz on refusal.
+   *  Fired inside the click gesture, so browser autoplay rules are satisfied. */
+  private buildSfx(ok: boolean): void {
+    try {
+      if (!this.sfxCtx) {
+        const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (!Ctor) return;
+        this.sfxCtx = new Ctor();
+      }
+      const ctx = this.sfxCtx;
+      if (ctx.state === "suspended") void ctx.resume();
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = ok ? "square" : "sawtooth";
+      const dur = ok ? 0.22 : 0.16;
+      osc.frequency.setValueAtTime(ok ? 170 : 130, now);
+      osc.frequency.exponentialRampToValueAtTime(ok ? 60 : 80, now + dur * 0.8);
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.linearRampToValueAtTime(ok ? 0.09 : 0.05, now + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+      osc.connect(g).connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + dur + 0.02);
+    } catch {
+      /* audio unavailable */
+    }
   }
 
   private flash(msg: string): void {
