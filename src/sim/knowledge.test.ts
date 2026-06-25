@@ -34,6 +34,30 @@ describe("knowledge / culture", () => {
     expect(k.aggregateEffects().researchMult).toBeCloseTo(1.15 * 1.2, 5);
   });
 
+  it("memoizes aggregateEffects but reflects newly discovered techs", () => {
+    const k = new Knowledge();
+    const base = k.aggregateEffects();
+    expect(base.researchMult).toBeCloseTo(1, 5);
+
+    // A fresh object is returned each call (so callers can mutate it safely),
+    // yet repeated calls on an unchanged set carry identical values.
+    const again = k.aggregateEffects();
+    expect(again).not.toBe(base);
+    expect(again).toEqual(base);
+    again.researchMult = 99; // mutating a returned copy must not poison the cache
+    expect(k.aggregateEffects().researchMult).toBeCloseTo(1, 5);
+
+    // Direct adds (not via addProgress) still invalidate via the size key.
+    k.discovered.add("gestures");
+    expect(k.aggregateEffects().researchMult).toBeCloseTo(1.15, 5);
+    k.discovered.add("caveArt");
+    expect(k.aggregateEffects().researchMult).toBeCloseTo(1.15 * 1.1, 5);
+
+    // Completion via addProgress also invalidates.
+    k.addProgress("stoneTools", 1000);
+    expect(k.aggregateEffects().gatherMult).toBeCloseTo(1.15, 5);
+  });
+
   it("accumulates partial research until a tech completes", () => {
     const k = new Knowledge();
     expect(k.addProgress("stoneTools", 30)).toBeNull();
