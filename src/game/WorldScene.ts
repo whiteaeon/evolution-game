@@ -646,6 +646,7 @@ export class WorldScene extends Phaser.Scene {
     this.input.keyboard!.on("keydown-M", () => this.toggleMute());
     this.input.keyboard!.on("keydown-H", () => this.toggleHelp());
     this.input.keyboard!.on("keydown-E", () => this.interact()); // talk to a nearby villager
+    this.input.keyboard!.on("keydown-I", () => this.inspectNearest()); // inspect a nearby leader/notable
     this.input.keyboard!.on("keydown-ENTER", () => this.confirm()); // place / reply / study
     // Any key press is a user gesture (enables audio); "?" toggles help and the
     // number row drives the build bar / dialog replies / research rows.
@@ -678,6 +679,31 @@ export class WorldScene extends Phaser.Scene {
     const npc = this.nearestNpc(56);
     if (npc) this.openDialog(npc.ind);
     else this.flash("No one nearby to talk to");
+  }
+
+  /** I: open the inspect card for the nearest leader/notable — inspect without a mouse. */
+  private inspectNearest(): void {
+    if (this.helpOpen || this.dialogOpen || this.techPanelOpen || this.inspectOpen || this.buildMode)
+      return;
+    const mark = this.nearestInspectable(56);
+    if (mark) this.openInspect(mark.ind);
+    else this.flash("No leader or notable nearby");
+  }
+
+  /** Nearest leader/notable marker to the chieftain within range — the one I inspects. */
+  private nearestInspectable(
+    range: number,
+  ): { ind: Individual; sprite: Phaser.GameObjects.Image; marker: Phaser.GameObjects.Text } | null {
+    let best: { ind: Individual; sprite: Phaser.GameObjects.Image; marker: Phaser.GameObjects.Text } | null = null;
+    let bestD = range;
+    for (const m of this.inspectMarks) {
+      const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, m.sprite.x, m.sprite.y);
+      if (d < bestD) {
+        bestD = d;
+        best = m;
+      }
+    }
+    return best;
   }
 
   /** Enter: confirm the active context — pick the first reply, study, or place. */

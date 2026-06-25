@@ -17,6 +17,7 @@ export const CONTROLS: readonly ControlHint[] = [
   { keys: "WASD / Arrows", action: "Move the chieftain" },
   { keys: "Space", action: "Gather from a nearby tree, bush, rock or farm" },
   { keys: "E", action: "Talk to the nearest villager (quests & lore)" },
+  { keys: "I", action: "Inspect the nearest leader or notable (✦)" },
   { keys: "1 / 2 / 3", action: "Pick a building (Campfire / Hut / Farm)" },
   { keys: "Enter", action: "Place the building · pick a reply · study" },
   { keys: "R", action: "Hold a ritual at a campfire" },
