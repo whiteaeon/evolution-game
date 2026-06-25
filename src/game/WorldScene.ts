@@ -53,6 +53,10 @@ interface Npc {
   ind: Individual;
   sprite: Phaser.GameObjects.Image;
   baseKey: string;
+  homeX: number;
+  homeY: number;
+  tx: number;
+  ty: number;
 }
 
 /** A harvestable node in the world — a tree, bush, rock or planted crop. */
@@ -102,6 +106,18 @@ export class WorldScene extends Phaser.Scene {
   private gatherPrompt!: Phaser.GameObjects.Text;
   private resHud!: Phaser.GameObjects.Text;
   private housing = 0;
+
+  private npcPhase = 0;
+  private npcTimer = 0;
+  private objText!: Phaser.GameObjects.Text;
+  private objIndex = 0;
+  private farmsBuilt = 0;
+  private readonly objectives = [
+    "Gather wood — walk to a tree and press Space",
+    "Build a Hut from the bar (15 wood)",
+    "Build a Farm for food (8 food)",
+    "Explore the land and talk to your tribe",
+  ];
 
   constructor() {
     super("world");
@@ -298,7 +314,7 @@ export class WorldScene extends Phaser.Scene {
       sprite.setData("npcId", ind.id);
       sprite.on("pointerover", () => this.showHover(ind, sprite));
       sprite.on("pointerout", () => this.hoverLabel.setVisible(false));
-      this.npcs.push({ ind, sprite, baseKey });
+      this.npcs.push({ ind, sprite, baseKey, homeX: x, homeY: y, tx: x, ty: y });
     });
   }
 
@@ -377,6 +393,18 @@ export class WorldScene extends Phaser.Scene {
         fontSize: "10px",
         color: "#cfe0d0",
         backgroundColor: "#00000066",
+        padding: { x: 6, y: 3 },
+      })
+      .setOrigin(0.5, 0)
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH);
+
+    this.objText = this.add
+      .text(VIEW_W / 2, 8, "", {
+        fontFamily: "monospace",
+        fontSize: "12px",
+        color: "#ffe08a",
+        backgroundColor: "#00000088",
         padding: { x: 6, y: 3 },
       })
       .setOrigin(0.5, 0)
@@ -559,6 +587,7 @@ export class WorldScene extends Phaser.Scene {
       // A farm is flat ground you walk over — and a renewable food source.
       const crop = this.add.image(wx, wy, "crop").setDepth(2);
       this.gatherables.push({ sprite: crop, kind: "food", amount: 12 });
+      this.farmsBuilt += 1;
       this.flash("Farm built — Space to harvest food");
     } else {
       this.add.image(wx, wy, t.icon).setOrigin(0.5, 0.9).setDepth(wy);
@@ -601,9 +630,58 @@ export class WorldScene extends Phaser.Scene {
   override update(_t: number, dt: number): void {
     this.ctrl.update(dt); // keeps the world model alive (no-op while paused)
     this.movePlayer(dt);
+    this.wanderNpcs(dt);
     this.updateGather();
+    this.updateObjective();
     this.revealFog();
     this.syncHud();
+  }
+
+  /** Gentle idle wandering so the camp feels alive even before time is running. */
+  private wanderNpcs(dt: number): void {
+    this.npcTimer += dt;
+    if (this.npcTimer > 220) {
+      this.npcTimer = 0;
+      this.npcPhase = (this.npcPhase + 1) & 3;
+    }
+    const speed = (16 * dt) / 1000;
+    this.npcs.forEach((n, i) => {
+      const s = n.sprite;
+      const dx = n.tx - s.x;
+      const dy = n.ty - s.y;
+      const d = Math.hypot(dx, dy);
+      if (d < 3) {
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.random() * 55;
+        n.tx = Phaser.Math.Clamp(n.homeX + Math.cos(a) * r, 30, WORLD_W - 30);
+        n.ty = Phaser.Math.Clamp(n.homeY + Math.sin(a) * r, 50, WORLD_H - 20);
+        if (s.texture.key !== n.baseKey) s.setTexture(n.baseKey);
+        return;
+      }
+      s.x += (dx / d) * speed;
+      s.y += (dy / d) * speed;
+      s.setDepth(s.y);
+      s.setFlipX(dx < 0);
+      const pose = HOMININ_WALK[(this.npcPhase + i) & 3];
+      const fk = homininFrameKey(n.baseKey, pose);
+      if (s.texture.key !== fk) s.setTexture(fk);
+    });
+  }
+
+  private objectiveComplete(i: number): boolean {
+    const r = this.ctrl.sim.state.resources;
+    if (i === 0) return r.wood >= 15;
+    if (i === 1) return this.housing >= 1;
+    if (i === 2) return this.farmsBuilt >= 1;
+    return false;
+  }
+
+  private updateObjective(): void {
+    if (this.objIndex < this.objectives.length - 1 && this.objectiveComplete(this.objIndex)) {
+      this.objIndex++;
+      this.flash("Objective complete!");
+    }
+    this.objText.setText("◆ " + this.objectives[this.objIndex]);
   }
 
   private blocked(x: number, y: number): boolean {
@@ -677,13 +755,25 @@ export class WorldScene extends Phaser.Scene {
     const moving = len > 0.001;
     if (moving) {
       const step = PLAYER_SPEED * sec;
-      const nx = Phaser.Math.Clamp(this.player.x + (dx / len) * step, 12, WORLD_W - 12);
-      const ny = Phaser.Math.Clamp(this.player.y + (dy / len) * step, 40, WORLD_H - 12);
-      // Resolve each axis separately so you slide along obstacles instead of sticking.
-      if (!this.blocked(nx, this.player.y)) this.player.x = nx;
-      if (!this.blocked(this.player.x, ny)) this.player.y = ny;
+      const ux = dx / len;
+      const uy = dy / len;
+      // Try the straight path, then progressively wider angles, so click-to-move
+      // routes around a tree/rock instead of jamming into it.
+      for (const a of [0, 0.4, -0.4, 0.9, -0.9, 1.4, -1.4]) {
+        const cos = Math.cos(a);
+        const sin = Math.sin(a);
+        const rx = ux * cos - uy * sin;
+        const ry = ux * sin + uy * cos;
+        const nx = Phaser.Math.Clamp(this.player.x + rx * step, 12, WORLD_W - 12);
+        const ny = Phaser.Math.Clamp(this.player.y + ry * step, 40, WORLD_H - 12);
+        if (!this.blocked(nx, ny)) {
+          this.player.x = nx;
+          this.player.y = ny;
+          if (Math.abs(rx) > 0.3) this.player.setFlipX(rx < 0);
+          break;
+        }
+      }
       this.player.setDepth(this.player.y);
-      if (Math.abs(dx) > 0.5) this.player.setFlipX(dx < 0);
 
       this.animTimer += dt;
       if (this.animTimer > 120) {
