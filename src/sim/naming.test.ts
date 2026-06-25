@@ -111,6 +111,20 @@ describe("notableIndividuals", () => {
     });
   });
 
+  it("labels trait-exemplar detail with a readable trait name, not the raw key", () => {
+    const pop = [
+      person({ id: 1, genome: { coldTolerance: 0.95 } }),
+      person({ id: 2, genome: { diseaseResistance: 0.95 } }),
+    ];
+    const details = notableIndividuals(pop)
+      .filter((n) => n.kind === "trait-exemplar")
+      .map((n) => n.detail);
+    expect(details).toContain("Cold Tolerance 0.95");
+    expect(details).toContain("Disease Resistance 0.95");
+    // No internal camelCase identifier leaks into the player-facing detail.
+    for (const d of details) expect(d).not.toMatch(/[a-z][A-Z]/);
+  });
+
   it("flags the first arrival of each lineage by lowest id", () => {
     const lineages: Lineage[] = ["neanderthal", "denisovan"];
     const pop: Individual[] = [
