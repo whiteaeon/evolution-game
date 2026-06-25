@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { Knowledge, TECH_ORDER } from "./knowledge.js";
+import { Knowledge, TECH_ORDER, TECH_TREE } from "./knowledge.js";
 import { pickResearchTarget } from "./production.js";
 import { Simulation } from "./simulation.js";
 
@@ -83,6 +83,55 @@ describe("knowledge / culture", () => {
     }
     // Everything discovered → nothing left to research.
     expect(pickResearchTarget(sim.state)).toBeNull();
+  });
+
+  it("fundResearch completes the chosen target and advances the era", () => {
+    const sim = new Simulation({ seed: 9, startingPopulation: 16 });
+    const k = sim.state.knowledge;
+
+    // A short push only accrues; it does not complete the tech.
+    sim.setResearchTarget("stoneTools");
+    expect(sim.fundResearch(TECH_TREE.stoneTools.cost - 1)).toBeNull();
+    expect(k.has("stoneTools")).toBe(false);
+    // One more point of insight tips it over → it is discovered and returned.
+    expect(sim.fundResearch(1)).toBe("stoneTools");
+    expect(k.has("stoneTools")).toBe(true);
+
+    // Drive the chain to a capstone; funding it advances state.era in step.
+    for (const t of ["gathering", "fire", "cooking", "gestures"] as const) {
+      sim.setResearchTarget(t);
+      sim.fundResearch(TECH_TREE[t].cost);
+    }
+    expect(sim.state.era).toBe("Paleolithic");
+    sim.setResearchTarget("agriculture");
+    expect(sim.fundResearch(TECH_TREE.agriculture.cost)).toBe("agriculture");
+    expect(sim.state.era).toBe("Neolithic");
+  });
+
+  it("fundResearch honours a resource-gated tech's raw-material bill", () => {
+    const sim = new Simulation({ seed: 11, startingPopulation: 16 });
+    const k = sim.state.knowledge;
+    k.discovered.add("pottery");
+    k.discovered.add("animalDomestication");
+    sim.setResearchTarget("bronzeworking");
+
+    // Fully fund it, but with no stone in stock it parks at the cost.
+    sim.state.resources.stone = 0;
+    expect(sim.fundResearch(TECH_TREE.bronzeworking.cost)).toBeNull();
+    expect(k.has("bronzeworking")).toBe(false);
+
+    // Provide the stone; the next push completes it and spends the bill.
+    sim.state.resources.stone = 50;
+    expect(sim.fundResearch(TECH_TREE.bronzeworking.cost)).toBe("bronzeworking");
+    expect(k.has("bronzeworking")).toBe(true);
+    expect(sim.state.resources.stone).toBe(50 - TECH_TREE.bronzeworking.resourceCost!.stone!);
+  });
+
+  it("fundResearch returns null once the whole tree is known", () => {
+    const sim = new Simulation({ seed: 13, startingPopulation: 16 });
+    for (const t of TECH_ORDER) sim.state.knowledge.discovered.add(t);
+    sim.setResearchTarget(null);
+    expect(sim.fundResearch(1000)).toBeNull();
   });
 
   it("persists across the death of every individual who discovered it", () => {

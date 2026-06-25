@@ -72,6 +72,33 @@ export function makeFireTextures(scene: Phaser.Scene): void {
   for (const key of CC0_GROUPS.fire) blit(scene, key);
 }
 
+/**
+ * A carved lore-totem — the in-world handle for directing the tribe's research.
+ * Hand-painted (no CC0 equivalent) into the same baked-texture pipeline as the
+ * hominin morph, under the stable key "totem".
+ */
+export function makeTotemTexture(scene: Phaser.Scene): void {
+  bake(scene, "totem", 16, 30, (g) => {
+    const wood = 0x7a5230;
+    const woodLit = lighten(wood, 12);
+    const woodDark = darken(wood, 14);
+    // post
+    px(g, woodDark, 5, 4, 6, 26);
+    px(g, wood, 6, 4, 4, 26);
+    px(g, woodLit, 6, 4, 1, 26); // lit left edge
+    // carved face
+    px(g, 0x2b1c10, 6, 10, 1, 1); // eyes
+    px(g, 0x2b1c10, 9, 10, 1, 1);
+    px(g, 0x2b1c10, 6, 14, 4, 1); // mouth
+    px(g, woodDark, 5, 12, 6, 1); // brow band
+    px(g, woodDark, 5, 20, 6, 1); // lower band
+    // painted spirit crown
+    px(g, 0x4caf8a, 4, 1, 8, 3);
+    px(g, lighten(0x4caf8a, 14), 4, 1, 8, 1);
+    px(g, 0xe0b84a, 6, 0, 4, 1);
+  });
+}
+
 // ── hominin morph (era + genome aware) — hand-authored, no CC0 equivalent ──────
 
 export interface MorphParams {
