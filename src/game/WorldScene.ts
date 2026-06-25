@@ -11,6 +11,7 @@ import {
 } from "./textures.js";
 import { HOMININ_WALK, homininFrameKey } from "./homininWalk.js";
 import { chooseNpcActivity, type NpcActivity } from "./npcActivity.js";
+import { pickGatherTarget } from "./gatherTarget.js";
 import { questMetric, type QuestMetrics, type QuestSpec } from "./quests.js";
 import { buildDialogue, type DialogNode } from "./dialogue.js";
 import { buildRaidSides, resolveRaid } from "./raidDefense.js";
@@ -109,6 +110,11 @@ type ResKind = "wood" | "food" | "stone";
 
 /** Minimum gap between harvests, so holding/spamming Space reads as crisp hits. */
 const GATHER_COOLDOWN_MS = 220;
+/** Reach within which a node is gatherable, and its targeting stickiness margin. */
+const GATHER_RANGE = 34;
+const GATHER_STICK = 12; // a held node only yields to one closer by more than this
+/** Warm tint that marks the currently-aimed node so the player sees the target. */
+const GATHER_HILITE = 0xffd27a;
 
 /** One study session at the totem: spend this much food, gain this much insight. */
 const STUDY_FOOD = 5;
@@ -299,6 +305,7 @@ export class WorldScene extends Phaser.Scene {
   private placed: { kind: "campfire" | "hut"; x: number; y: number }[] = [];
   private gatherKey!: Phaser.Input.Keyboard.Key;
   private gatherCooldown = 0;
+  private gatherTarget: Gatherable | null = null; // sticky aimed node, highlighted for the player
   // Diegetic audio: synthesized SFX + a biome/time-of-day ambient bed, silent
   // until a user gesture resumes it and behind the mute toggle (see ../ui/audio).
   private audio = new WorldAudio();
@@ -2213,7 +2220,17 @@ export class WorldScene extends Phaser.Scene {
 
   private updateGather(dt: number): void {
     if (this.gatherCooldown > 0) this.gatherCooldown -= dt;
-    const node = this.nearestGatherable(34);
+    // Sticky targeting: keep the aimed node steady so the prompt — and the node
+    // Space harvests — doesn't flicker between two nearby nodes as the player drifts.
+    const prev = this.gatherTarget ? this.gatherables.indexOf(this.gatherTarget) : -1;
+    const pts = this.gatherables.map((g) => ({ x: g.sprite.x, y: g.sprite.y }));
+    const idx = pickGatherTarget(this.player.x, this.player.y, pts, prev, GATHER_RANGE, GATHER_STICK);
+    const node = idx >= 0 ? this.gatherables[idx] : null;
+    if (node !== this.gatherTarget) {
+      this.gatherTarget?.sprite.clearTint();
+      node?.sprite.setTint(GATHER_HILITE);
+      this.gatherTarget = node;
+    }
     if (!node) {
       this.gatherPrompt.setVisible(false);
       return;
@@ -2226,19 +2243,6 @@ export class WorldScene extends Phaser.Scene {
       .setPosition(node.sprite.x - cam.scrollX, node.sprite.y - cam.scrollY - node.sprite.displayHeight)
       .setVisible(true);
     if (ready && Phaser.Input.Keyboard.JustDown(this.gatherKey)) this.gather(node);
-  }
-
-  private nearestGatherable(range: number): Gatherable | null {
-    let best: Gatherable | null = null;
-    let bestD = range;
-    for (const g of this.gatherables) {
-      const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, g.sprite.x, g.sprite.y);
-      if (d < bestD) {
-        bestD = d;
-        best = g;
-      }
-    }
-    return best;
   }
 
   private gather(node: Gatherable): void {
@@ -2263,6 +2267,8 @@ export class WorldScene extends Phaser.Scene {
     if (node.amount <= 0) {
       // Depleted: a final pop, then clearly wilt away — shrink, tip and fade out.
       this.gatherables = this.gatherables.filter((g) => g !== node);
+      if (this.gatherTarget === node) this.gatherTarget = null; // target gone; re-aim next frame
+      node.sprite.clearTint(); // drop the highlight before the wilt tween plays
       this.popParticles(px, py, RES_COLOR[node.kind]);
       this.tweens.add({
         targets: spr,
