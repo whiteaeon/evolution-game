@@ -223,6 +223,15 @@ button.big { font-weight: 700; padding: 7px 14px; }
 .lang { margin-top: 8px; font-size: 11px; color: #7a6850; }
 .lang span.on { color: var(--good); font-weight: 600; }
 
+/* policies */
+.policies { display: flex; flex-direction: column; gap: 9px; }
+.policy-axis { display: flex; flex-direction: column; gap: 4px; }
+.paxis-name { font-size: 12px; font-weight: 600; color: #cdb79a; }
+.pstances { display: flex; gap: 5px; }
+.pstances button { flex: 1; font-size: 11px; padding: 4px 2px; }
+.pstances button.on { background: var(--accent2); border-color: var(--accent); color: #2a1c0e; font-weight: 700; }
+.pblurb { font-size: 10px; color: #7a6850; min-height: 1px; }
+
 /* tech tree */
 .techtree { display: flex; flex-direction: column; gap: 8px; max-height: 260px; overflow-y: auto; }
 .techera-h { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); margin-bottom: 3px; opacity: 0.8; }
