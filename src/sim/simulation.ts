@@ -224,6 +224,10 @@ export interface SimState {
     winterChainsSurvived: number;
     /** Distinct hominin lineages the tribe has interbred with. */
     lineagesInterbred: Lineage[];
+    /** Distinct biomes the tribe has ever lived in (for the codex). */
+    biomesVisited: Biome[];
+    /** Distinct choice-driven event chains the tribe has encountered (for the codex). */
+    eventChainsSeen: EventChainId[];
   };
   /** A short, human-readable description of the next objective. */
   goal: string;
@@ -284,6 +288,8 @@ export class Simulation {
         peakPopulation: individuals.length,
         winterChainsSurvived: 0,
         lineagesInterbred: [],
+        biomesVisited: [region.biome],
+        eventChainsSeen: [],
       },
       goal: "",
       quests: initQuests(),
@@ -369,6 +375,7 @@ export class Simulation {
     s.region = target.id;
     s.biome = target.biome;
     s.totals.migrations++;
+    if (!s.totals.biomesVisited.includes(target.biome)) s.totals.biomesVisited.push(target.biome);
     this.logEvent("milestone", `The tribe migrates to ${target.name} (${target.biome})${deaths ? ` — ${deaths} lost on the journey` : ""}.`);
     return deaths;
   }
@@ -753,6 +760,7 @@ export class Simulation {
     if (eligible.length === 0) return;
     const id = this.rng.pick(eligible);
     s.pendingChoice = { id, ...EVENT_CHAIN_DEF[id], expiresTick: s.tick + 6 };
+    if (!s.totals.eventChainsSeen.includes(id)) s.totals.eventChainsSeen.push(id);
     this.logEvent("choice", s.pendingChoice.message);
   }
 
