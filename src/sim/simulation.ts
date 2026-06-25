@@ -140,6 +140,54 @@ const EVENT_CHAIN_DEF: Record<
       { label: "Raid the cache", hint: "much more food, but lives at risk" },
     ],
   },
+  prophet: {
+    title: "A seer's vision",
+    message: "A wandering seer speaks of signs in the sky. Make an offering, or follow the vision?",
+    options: [
+      { label: "Make an offering", hint: "spend food, the camp's spirits lift" },
+      { label: "Follow the vision", hint: "hard-won insight, but the trance can kill the unready" },
+    ],
+  },
+  migrationOmen: {
+    title: "A great migration",
+    message: "The herds are on the move and the omens point away. Let them pass, or follow?",
+    options: [
+      { label: "Let the herds pass", hint: "a lean season, but no one is lost" },
+      { label: "Follow the herds", hint: "much food, but the cold trek claims the frail" },
+    ],
+  },
+  feud: {
+    title: "A blood feud",
+    message: "Two families are at each other's throats. Broker a peace, or let them settle it?",
+    options: [
+      { label: "Broker a peace", hint: "spend food on a feast, no blood spilled" },
+      { label: "Let them settle it", hint: "costs nothing, but the quarrel may turn deadly" },
+    ],
+  },
+  bountifulFlood: {
+    title: "A bountiful flood",
+    message: "The river bursts its banks over the fertile plain. Move to high ground, or harvest the silt?",
+    options: [
+      { label: "Move to high ground", hint: "some stores spoil, but everyone is safe" },
+      { label: "Harvest the flooded plain", hint: "a great haul, but some are swept away" },
+    ],
+  },
+  stranger: {
+    title: "A stranger bearing knowledge",
+    message: "A lone traveller offers to share what they know. Listen at the fire, or take them in?",
+    options: [
+      { label: "Share a meal and listen", hint: "spend food for a little insight" },
+      { label: "Take the stranger in", hint: "deep insight, but they may carry fever" },
+    ],
+  },
+  sacredSite: {
+    title: "A sacred site",
+    message: "Scouts find a place that hums with old power. Honour it from afar, or claim its ground?",
+    options: [
+      { label: "Honour it from afar", hint: "leave offerings, the camp's spirits lift" },
+      { label: "Claim the sacred ground", hint: "rich materials, but the ground is guarded" },
+    ],
+  },
 };
 
 const eraIndex = (e: Era) => ERAS.indexOf(e);
@@ -715,6 +763,11 @@ export class Simulation {
     if (s.world.cold > 0.5) out.push("hardWinter");
     if (this.living.length >= 8) out.push("sickCamp");
     if (eraIndex(s.era) >= eraIndex("Bronze Age")) out.push("rivalCache");
+    // Always-available chains: mysticism, herds and sacred ground need no setup.
+    out.push("prophet", "migrationOmen", "sacredSite");
+    if (this.living.length >= 10) out.push("feud");
+    // Floods matter to settled farmers; trade strangers travel established routes.
+    if (eraIndex(s.era) >= eraIndex("Neolithic")) out.push("bountifulFlood", "stranger");
     return out;
   }
 
@@ -763,7 +816,87 @@ export class Simulation {
           this.logEvent("choice", `The tribe trades for ${Math.round(gain)} food, keeping the peace.`);
         }
         break;
+      case "prophet":
+        if (risky) {
+          this.grantInsight(40);
+          const lost = this.applyHazard("intelligence", BALANCE.diseaseLethality);
+          this.logEvent("choice", `Seekers walk the seer's vision and return with insight${lost ? ` — ${lost} did not wake from the trance` : ""}.`);
+        } else {
+          s.resources.food = Math.max(0, s.resources.food - 6);
+          for (const ind of this.living) ind.health = clamp01(ind.health + 0.12);
+          this.logEvent("choice", "Offerings are made; the camp's spirits lift.");
+        }
+        break;
+      case "migrationOmen":
+        if (risky) {
+          const gain = 20 * s.world.abundance;
+          s.resources.food += gain;
+          const lost = this.applyHazard("coldTolerance", BALANCE.coldLethality);
+          this.logEvent("choice", `The tribe follows the herds for ${Math.round(gain)} food${lost ? ` — ${lost} were lost to the cold trek` : ""}.`);
+        } else {
+          s.resources.food = Math.max(0, s.resources.food - 5);
+          this.logEvent("choice", "The herds pass on; the tribe weathers a lean season.");
+        }
+        break;
+      case "feud":
+        if (risky) {
+          const lost = this.applyHazard("strength", BALANCE.raidLethality);
+          this.logEvent("choice", `The families settle it themselves${lost ? ` — ${lost} fell to the feud` : ""}.`);
+        } else {
+          s.resources.food = Math.max(0, s.resources.food - 7);
+          for (const ind of this.living) ind.health = clamp01(ind.health + 0.1);
+          this.logEvent("choice", "A feast reconciles the families and the camp heals.");
+        }
+        break;
+      case "bountifulFlood":
+        if (risky) {
+          const gain = 24 * s.world.abundance;
+          s.resources.food += gain;
+          const lost = this.applyHazard("strength", BALANCE.predatorLethality);
+          this.logEvent("choice", `The flooded plain yields ${Math.round(gain)} food${lost ? ` — ${lost} were swept away` : ""}.`);
+        } else {
+          s.resources.food = Math.max(0, s.resources.food - 5);
+          this.logEvent("choice", "The tribe retreats to high ground; some stores spoil.");
+        }
+        break;
+      case "stranger":
+        if (risky) {
+          this.grantInsight(60);
+          const lost = this.applyHazard("diseaseResistance", BALANCE.diseaseLethality);
+          this.logEvent("choice", `The stranger teaches deeply${lost ? `, but the fever they carried took ${lost}` : ""}.`);
+        } else {
+          s.resources.food = Math.max(0, s.resources.food - 6);
+          this.grantInsight(25);
+          this.logEvent("choice", "The stranger shares a meal and a little of what they know.");
+        }
+        break;
+      case "sacredSite":
+        if (risky) {
+          const gain = 8 * s.world.abundance;
+          s.resources.materials += 10;
+          s.resources.food += gain;
+          const lost = this.applyHazard("strength", BALANCE.predatorLethality);
+          this.logEvent("choice", `The tribe claims the sacred ground — rich materials${lost ? `, but ${lost} fell to its guardians` : ""}.`);
+        } else {
+          s.resources.food = Math.max(0, s.resources.food - 5);
+          for (const ind of this.living) ind.health = clamp01(ind.health + 0.1);
+          this.logEvent("choice", "Offerings are left at the sacred site; the camp's spirits lift.");
+        }
+        break;
     }
+  }
+
+  /**
+   * Push research points onto the current target (cultural insight from an event).
+   * Mirrors the research loop's use of {@link Knowledge.addProgress} so a gift of
+   * insight can complete a tech just as ordinary research would.
+   */
+  private grantInsight(points: number): void {
+    const s = this.state;
+    const target = s.researchTarget ?? s.knowledge.available()[0] ?? null;
+    if (!target) return;
+    const done = s.knowledge.addProgress(target, points);
+    if (done) this.logEvent("discovery", `A flash of insight completes ${TECH_TREE[done].name}!`);
   }
 
   private reproduce(e: Required<TechEffects>): void {

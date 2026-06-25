@@ -226,7 +226,17 @@ export interface Encounter {
 }
 
 /** Branching, choice-driven event chains the player resolves with a trade-off. */
-export const EVENT_CHAINS = ["hardWinter", "sickCamp", "rivalCache"] as const;
+export const EVENT_CHAINS = [
+  "hardWinter",
+  "sickCamp",
+  "rivalCache",
+  "prophet",
+  "migrationOmen",
+  "feud",
+  "bountifulFlood",
+  "stranger",
+  "sacredSite",
+] as const;
 export type EventChainId = (typeof EVENT_CHAINS)[number];
 
 export interface ChoiceOption {
