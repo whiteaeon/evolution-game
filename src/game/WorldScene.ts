@@ -1557,6 +1557,11 @@ export class WorldScene extends Phaser.Scene {
     this.talkedTo = new Set();
     this.economyTimer = 0;
     this.epidemicBeats = 0;
+    // Restart kills any in-flight particle tweens without firing their
+    // onComplete decrements, so the live-particle counter would leak across a
+    // load — left high, it permanently shrinks every future burst's budget
+    // (particleBudget starves once active ≥ cap). Reset it to a clean slate.
+    this.activeParticles = 0;
   }
 
   private toggleBuild(id: string, keyboard = false): void {
