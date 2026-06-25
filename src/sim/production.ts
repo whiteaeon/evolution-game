@@ -38,7 +38,7 @@ export function produce(eng: SimEngine, e: Required<TechEffects>): void {
     stone += BALANCE.stonePerBuilder * eff * e.buildMult * b.stone;
   }
   s.resources.buildProgress += build;
-  s.resources.materials += build * 0.2;
+  s.resources.materials += build * BALANCE.materialsPerBuild;
   s.resources.wood += wood;
   s.resources.stone += stone;
 

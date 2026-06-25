@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Simulation } from "./simulation.js";
 import { Knowledge } from "./knowledge.js";
 import { TECH_TREE } from "./knowledge.js";
+import { BALANCE } from "./balance.js";
 
 /** Run a sim a few ticks with a fixed allocation, returning it for inspection. */
 function runWith(
@@ -27,6 +28,16 @@ describe("carryable resources — production", () => {
 
     const hunters = runWith({ hunt: 12 }, "wide-savanna", 5); // grassland: high hide
     expect(hunters.state.resources.hide).toBeGreaterThan(0);
+  });
+
+  it("builders produce worked goods at BALANCE.materialsPerBuild per unit of build labour", () => {
+    const sim = runWith({ build: 12 }, "deepwood", 5);
+    // Materials are minted alongside structure progress at a fixed ratio; with no
+    // other materials source (no quests/diplomacy here) the only way materials grow.
+    expect(sim.state.resources.materials).toBeCloseTo(
+      sim.state.resources.buildProgress * BALANCE.materialsPerBuild,
+      9,
+    );
   });
 
   it("with no workers assigned, no raw resources are produced", () => {
