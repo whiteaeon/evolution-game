@@ -25,6 +25,7 @@ import { gatherFacing } from "./gatherFacing.js";
 import { gatherPromptText } from "./gatherPrompt.js";
 import { depletionScale } from "./nodeDepletion.js";
 import { questMetric, questReadyBanner, type QuestMetrics, type QuestSpec } from "./quests.js";
+import { questCompass } from "./questCompass.js";
 import { buildDialogue, type DialogNode } from "./dialogue.js";
 import { buildRaidSides, resolveRaid } from "./raidDefense.js";
 import { raidPressed } from "./raidPeace.js";
@@ -106,6 +107,8 @@ const DIALOG_H = 150;
 const DIALOG_X = VIEW_W / 2;
 const DIALOG_Y = VIEW_H - 90;
 const UI_DEPTH = 100000;
+/** Inset (px) the off-screen quest-giver arrow rides inside the viewport edge. */
+const QUEST_ARROW_PAD = 26;
 
 // Research (tech) panel geometry, shared by its frame and the row/button layout.
 const TECH_W = 452;
@@ -423,6 +426,7 @@ export class WorldScene extends Phaser.Scene {
   private talkedTo = new Set<number>(); // distinct villagers the player has spoken to
   private quests: Quest[] = [];
   private questMarkers = new Map<number, Phaser.GameObjects.Text>();
+  private questArrow!: Phaser.GameObjects.Text; // edge compass to an off-screen ready giver
   private exploreRegions: Region[] = [];
   private regionExplored: Record<string, number> = {}; // fog cells revealed per region
   private gathered: Record<ResKind, number> = { wood: 0, food: 0, stone: 0 };
@@ -1215,6 +1219,20 @@ export class WorldScene extends Phaser.Scene {
       .setOrigin(0.5, 0)
       .setScrollFactor(0)
       .setDepth(UI_DEPTH);
+
+    // Edge arrow toward an off-screen quest-giver waiting for a turn-in. Hidden
+    // until updateQuests finds a "ready" quest whose giver is off-screen.
+    this.questArrow = this.add
+      .text(0, 0, "➤", {
+        fontFamily: "monospace",
+        fontSize: "22px",
+        color: QUEST_MARKER.ready.color,
+        fontStyle: "bold",
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH + 1)
+      .setVisible(false);
 
     this.hoverLabel = this.add
       .text(0, 0, "", {
@@ -2113,6 +2131,7 @@ export class WorldScene extends Phaser.Scene {
     const progress = (q: Quest) => questMetric(q, metrics) - q.start;
     const view = this.cameras.main.worldView;
     let tracker = "";
+    let readyGiver: Npc | null = null; // first off-screen giver awaiting a turn-in
     for (const q of this.quests) {
       if (q.state === "active" && progress(q) >= q.target) {
         // Fires exactly once: the flip to "ready" below gates this branch out on
@@ -2156,7 +2175,13 @@ export class WorldScene extends Phaser.Scene {
             ? `◆ ${q.desc} — done! return to ${who}`
             : `◆ ${who}: ${q.desc} — ${Math.min(progress(q), q.target)}/${q.target}`;
       }
+      // A ready quest whose giver is off-screen gets an edge arrow pointing the
+      // way back. The home anchor is stable even while the giver is culled.
+      if (!readyGiver && q.state === "ready" && giver && !npcOnScreen(giver.homeX, giver.homeY, view)) {
+        readyGiver = giver;
+      }
     }
+    this.updateQuestArrow(readyGiver, view);
     if (!tracker) {
       tracker = this.quests.some((q) => q.state === "available")
         ? "◆ Find a villager marked ! for a task"
@@ -2164,6 +2189,26 @@ export class WorldScene extends Phaser.Scene {
     }
     this.objText.setText(tracker);
     if (this.questLogOpen) this.refreshQuestLog();
+  }
+
+  /** Pin the compass arrow to the screen edge toward an off-screen ready giver. */
+  private updateQuestArrow(giver: Npc | null, view: Phaser.Geom.Rectangle): void {
+    if (!giver) {
+      this.questArrow.setVisible(false);
+      return;
+    }
+    const mark = questCompass(giver.homeX, giver.homeY, view, VIEW_W, VIEW_H, QUEST_ARROW_PAD);
+    if (!mark) {
+      this.questArrow.setVisible(false);
+      return;
+    }
+    // A gentle pulse so the cue reads as live without stealing focus.
+    const pulse = 1 + Math.sin(this.time.now / 200) * 0.12;
+    this.questArrow
+      .setPosition(mark.x, mark.y)
+      .setAngle(mark.angle)
+      .setScale(pulse)
+      .setVisible(true);
   }
 
   // ── quest log panel ────────────────────────────────────────────────────────
