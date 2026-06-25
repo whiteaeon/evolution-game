@@ -28,6 +28,7 @@ import { raidPressed } from "./raidPeace.js";
 import { outbreakRisk } from "./epidemicRisk.js";
 import { isPointVisible } from "./cull.js";
 import { npcOnScreen } from "./npcCull.js";
+import { shouldScanFog } from "./fogScan.js";
 import { particleBudget } from "./particleBudget.js";
 import { footstepDust } from "./footstepDust.js";
 import { nightGlowAlpha } from "./nightGlow.js";
@@ -323,6 +324,8 @@ export class WorldScene extends Phaser.Scene {
   private fog: Phaser.GameObjects.Rectangle[] = [];
   private fogRevealed: boolean[] = [];
   private fogRemaining = 0; // unrevealed cells left, so revealFog can stop scanning
+  private lastFogX = Number.NaN; // player pos at the last fog scan; skip rescans while still
+  private lastFogY = Number.NaN;
 
   private dialog!: Phaser.GameObjects.Container;
   private dialogName!: Phaser.GameObjects.Text;
@@ -1548,6 +1551,8 @@ export class WorldScene extends Phaser.Scene {
     this.fog = [];
     this.fogRevealed = [];
     this.fogRemaining = 0;
+    this.lastFogX = Number.NaN; // force a fresh scan after the world rebuilds
+    this.lastFogY = Number.NaN;
     this.solids = [];
     this.gatherables = [];
     this.campfires = [];
@@ -3402,9 +3407,14 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private revealFog(): void {
-    if (this.fogRemaining === 0) return; // whole map lifted — skip the scan entirely
     const px = this.player.x;
     const py = this.player.y;
+    // Fog uncovers purely from the player's position, so a stationary player's
+    // window reveals nothing new after the first scan — skip the rescan until
+    // they move (or once the whole map is already lifted).
+    if (!shouldScanFog(this.fogRemaining, px, py, this.lastFogX, this.lastFogY)) return;
+    this.lastFogX = px;
+    this.lastFogY = py;
     const reach = 150;
     const cols = Math.ceil(WORLD_W / FOG_CELL);
     const rows = Math.ceil(WORLD_H / FOG_CELL);
