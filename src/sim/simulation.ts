@@ -135,6 +135,21 @@ const BALANCE = {
   // tech (burial/art/republic…) and in chunks from ritual event chains.
   culturePerCultureTech: 0.2, // culture per discovered culture-tech, per tick
   cultureRitual: 14, // culture from resolving a ritual/belief event chain
+  // Epidemics: occasional, severe disease outbreaks layered on top of the endemic
+  // disease in mortalityProb. Severity scales with crowding (pop/capacity), the
+  // biome's diseaseMult and the era (denser settlements spread sickness faster),
+  // and is attenuated by medicine/sanitation/vaccines (diseaseDefense). All terms
+  // are bounded so an outbreak can hurt but never wipe a tribe out — survival is
+  // weighted hard toward diseaseResistance, so epidemics select for it.
+  epidemicInterval: 67, // ticks between possible epidemics (prime, distinct from eventInterval)
+  epidemicChance: 0.5, // chance an epidemic actually breaks out on an interval tick
+  epidemicMinPop: 6, // outbreaks never fire below this headcount (don't doom a recovering tribe)
+  epidemicBaseSeverity: 0.5, // base per-fully-susceptible death probability before scaling
+  epidemicDensityFloor: 0.4, // density term at zero crowding (a floor, so sparse tribes still risk a little)
+  epidemicDensityScale: 0.8, // extra density term at full crowding (pop == capacity)
+  epidemicEraScale: 0.06, // severity multiplier added per era index (Paleolithic 0 … Information 8)
+  epidemicMaxSeverity: 0.7, // hard ceiling on severity (bounds the worst outbreak; never a guaranteed wipe)
+  epidemicSelectionExponent: 1.6, // >1 makes survival skew harder toward diseaseResistance than endemic disease
 };
 
 interface ShelterDef {
@@ -382,6 +397,13 @@ export class Simulation {
    * stream, balance or replay, yet it is saved/restored so it resumes identically.
    */
   private settlementRng: RNG;
+  /**
+   * Separate RNG stream for epidemics, mirroring rivalRng/settlementRng: keeping
+   * outbreak rolls off the main stream means adding epidemics never perturbs the
+   * existing replay alignment, yet it is saved/restored so outbreaks resume
+   * deterministically.
+   */
+  private epidemicRng: RNG;
   private nextId = 1;
   state: SimState;
   allocation: TaskAllocation;
@@ -391,6 +413,7 @@ export class Simulation {
     this.rng = new RNG(this.config.seed);
     this.rivalRng = new RNG((this.config.seed ^ 0x5f3759df) >>> 0);
     this.settlementRng = new RNG((this.config.seed ^ 0x85ebca6b) >>> 0);
+    this.epidemicRng = new RNG((this.config.seed ^ 0xc2b2ae35) >>> 0);
     this.allocation = Object.fromEntries(TASKS.map((t) => [t, 0])) as TaskAllocation;
     this.state = this.createInitialState();
   }
@@ -754,6 +777,7 @@ export class Simulation {
     const popBeforeDeaths = this.living.length;
     this.ageAndDie(effects);
     this.maybeEvent(effects);
+    this.maybeEpidemic(effects);
     this.maybeRaid(effects);
     // A notable loss: several of the tribe fell in a single year — they grieve.
     if (popBeforeDeaths - this.living.length >= 2) this.emitDialogue("death");
@@ -1130,6 +1154,80 @@ export class Simulation {
       }
     }
     return deaths;
+  }
+
+  /**
+   * Bounded severity of an epidemic right now: the per-fully-susceptible death
+   * probability before each individual's diseaseResistance is applied. Scales up
+   * with crowding (population / carrying capacity), the biome's diseaseMult and
+   * the era (denser, more-connected settlements spread disease faster), and is
+   * attenuated by medicine/sanitation/vaccines via {@link TechEffects.diseaseDefense}.
+   * Clamped to [0, epidemicMaxSeverity] so a single outbreak can never be a
+   * guaranteed wipe — keeping the game winnable. Pure query: no RNG, no mutation.
+   */
+  epidemicSeverity(e: Required<TechEffects>): number {
+    const capacity = Math.max(1, this.carryingCapacity(e));
+    const density = clamp01(this.living.length / capacity);
+    const densityTerm = BALANCE.epidemicDensityFloor + density * BALANCE.epidemicDensityScale;
+    const eraTerm = 1 + eraIndex(this.state.era) * BALANCE.epidemicEraScale;
+    const mitigation = clamp01(1 - e.diseaseDefense);
+    const raw =
+      BALANCE.epidemicBaseSeverity *
+      densityTerm *
+      this.biome().diseaseMult *
+      eraTerm *
+      mitigation;
+    return Math.min(BALANCE.epidemicMaxSeverity, raw);
+  }
+
+  /**
+   * Apply one epidemic at the current scaled severity, returning the death count.
+   * Survival is weighted hard toward diseaseResistance — susceptibility is
+   * `(1 - resistance)^epidemicSelectionExponent` with the exponent > 1, so the
+   * frail die disproportionately and outbreaks select for resistance more sharply
+   * than endemic disease. Public so the severity → mortality pipeline can be
+   * exercised deterministically in tests; the gating lives in {@link maybeEpidemic}.
+   */
+  triggerEpidemic(e: Required<TechEffects> = this.state.knowledge.aggregateEffects()): number {
+    const severity = this.epidemicSeverity(e);
+    if (severity <= 0) return 0;
+    const s = this.state;
+    let deaths = 0;
+    for (const ind of this.living) {
+      const susceptibility = Math.pow(
+        1 - ind.genome.diseaseResistance,
+        BALANCE.epidemicSelectionExponent,
+      );
+      if (this.epidemicRng.chance(clamp01(severity * susceptibility))) {
+        ind.alive = false;
+        s.totals.deaths++;
+        this.invalidateLiving();
+        deaths++;
+      }
+    }
+    return deaths;
+  }
+
+  /**
+   * Occasionally unleash an epidemic on the home tribe. Fires on its own interval
+   * and roll drawn from {@link epidemicRng}, so adding it leaves the main stream's
+   * replay alignment untouched. Never fires below {@link BALANCE.epidemicMinPop} so
+   * a small, recovering tribe is not doomed.
+   */
+  private maybeEpidemic(e: Required<TechEffects>): void {
+    const s = this.state;
+    if (s.tick % BALANCE.epidemicInterval !== 0) return;
+    if (this.living.length < BALANCE.epidemicMinPop) return;
+    if (!this.epidemicRng.chance(BALANCE.epidemicChance)) return;
+    const before = this.living.length;
+    const deaths = this.triggerEpidemic(e);
+    this.logEvent(
+      "disease",
+      deaths > 0
+        ? `An epidemic sweeps the crowded camp — ${deaths} lost.`
+        : "An epidemic passes through, but the tribe holds.",
+    );
+    if (before - this.living.length >= 2) this.emitDialogue("death");
   }
 
   /** The tribe's defensive rating for a skirmish: shelter tier + defensive tech. */
@@ -1993,6 +2091,7 @@ export class Simulation {
       rng: this.rng.getState(),
       rivalRng: this.rivalRng.getState(),
       settlementRng: this.settlementRng.getState(),
+      epidemicRng: this.epidemicRng.getState(),
       nextId: this.nextId,
       allocation: this.allocation,
       state: { ...this.state, knowledge: this.state.knowledge.serialize(), culture: this.state.culture.serialize(), policies: this.state.policies.serialize(), settlements },
@@ -2006,6 +2105,7 @@ export class Simulation {
     sim.rng.setState(data.rng);
     if (typeof data.rivalRng === "number") sim.rivalRng.setState(data.rivalRng);
     if (typeof data.settlementRng === "number") sim.settlementRng.setState(data.settlementRng);
+    if (typeof data.epidemicRng === "number") sim.epidemicRng.setState(data.epidemicRng);
     sim.nextId = data.nextId;
     sim.allocation = data.allocation;
     sim.state = {
