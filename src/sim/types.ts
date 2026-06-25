@@ -240,6 +240,14 @@ export const EVENT_CHAINS = [
 ] as const;
 export type EventChainId = (typeof EVENT_CHAINS)[number];
 
+/**
+ * Periodic diplomacy events with a specific rival tribe. They share the
+ * pending-choice mechanism with {@link EventChainId} but carry a `rivalId`, and
+ * their outcomes adjust the rival's relations score (not just resources).
+ */
+export const DIPLOMACY_EVENTS = ["diploGift", "diploTension", "diploRequest"] as const;
+export type DiplomacyId = (typeof DIPLOMACY_EVENTS)[number];
+
 export interface ChoiceOption {
   /** Button label. */
   label: string;
@@ -253,12 +261,14 @@ export interface ChoiceOption {
  * the cautious choice; option 1 is the risky one.
  */
 export interface PendingChoice {
-  id: EventChainId;
+  id: EventChainId | DiplomacyId;
   title: string;
   message: string;
   options: [ChoiceOption, ChoiceOption];
   /** Tick the offer expires if the player ignores it. */
   expiresTick: number;
+  /** For diplomacy events: the rival tribe this choice concerns. */
+  rivalId?: string;
 }
 
 export interface ResourcePools {

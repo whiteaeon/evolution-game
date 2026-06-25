@@ -6,6 +6,7 @@ import { Simulation } from "./simulation.js";
 import {
   createRivals,
   evolveRival,
+  shiftRelations,
   RIVAL_BALANCE,
   rivalEra,
   type RivalTribe,
@@ -39,6 +40,7 @@ describe("rival creation", () => {
       expect(REGIONS.some((reg) => reg.id === r.homeRegion)).toBe(true);
       expect(r.biome).toBe(REGIONS.find((reg) => reg.id === r.homeRegion)!.biome);
       expect(r.eraIndex).toBe(0); // everyone starts in the Paleolithic
+      expect(r.relations).toBe(0); // relations start neutral — only diplomacy moves them
       inBounds(r);
     }
   });
@@ -85,6 +87,36 @@ describe("rival per-tick evolution", () => {
     const moved =
       r.population !== before.pop || r.disposition !== before.disp;
     expect(moved).toBe(true);
+  });
+});
+
+describe("rival relations shifts", () => {
+  it("moves relations by the delta and is purely additive", () => {
+    const [r] = createRivals(new RNG(1), "frostvale");
+    expect(r.relations).toBe(0);
+    shiftRelations(r, 0.2);
+    expect(r.relations).toBeCloseTo(0.2, 10);
+    shiftRelations(r, 0.3);
+    expect(r.relations).toBeCloseTo(0.5, 10);
+    shiftRelations(r, -0.5);
+    expect(r.relations).toBeCloseTo(0, 10);
+  });
+
+  it("clamps relations to [-1, 1]", () => {
+    const [r] = createRivals(new RNG(2), "frostvale");
+    shiftRelations(r, 5);
+    expect(r.relations).toBe(1);
+    shiftRelations(r, -5);
+    expect(r.relations).toBe(-1);
+    shiftRelations(r, -5);
+    expect(r.relations).toBe(-1);
+  });
+
+  it("does not touch the rival's intrinsic disposition", () => {
+    const [r] = createRivals(new RNG(3), "frostvale");
+    const disp = r.disposition;
+    shiftRelations(r, 0.4);
+    expect(r.disposition).toBe(disp);
   });
 });
 
