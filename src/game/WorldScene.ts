@@ -26,7 +26,17 @@ const WORLD_H = 1120;
 const CAMP = { x: WORLD_W / 2, y: WORLD_H / 2 };
 const CLEARING_R = 150;
 
-const PLAYER_SPEED = 115; // px/sec
+const PLAYER_SPEED = 142; // px/sec top speed
+// Velocity ramps toward the target each frame (lerp factor per second), so the
+// chieftain has a little heft: a quick spin-up and a brief glide to a stop
+// rather than snapping between full speed and frozen.
+const PLAYER_ACCEL = 10; // spin-up: brisk but not instant
+const PLAYER_DECEL = 14; // stopping: a short glide, never a long skid
+const PLAYER_SCALE = 1.15;
+// How far ahead the camera looks in the travel direction, and the lerp that
+// eases the lead in/out so reversing course doesn't whip the view.
+const CAMERA_LEAD = 64;
+const CAMERA_LEAD_LERP = 4;
 const FOG_CELL = 64;
 const FOG_DEPTH = 5000;
 const UI_DEPTH = 100000;
@@ -102,6 +112,11 @@ export class WorldScene extends Phaser.Scene {
   private keys!: Record<"up" | "down" | "left" | "right", Phaser.Input.Keyboard.Key[]>;
   private animTimer = 0;
   private animPhase = 0;
+  private vx = 0; // current velocity (px/sec) — ramped toward the input direction
+  private vy = 0;
+  private bobPhase = 0; // accumulates with distance walked, drives the footstep bob
+  private leadX = 0; // eased camera lead offset, grows in the travel direction
+  private leadY = 0;
 
   private npcs: Npc[] = [];
   private hoverLabel!: Phaser.GameObjects.Text;
@@ -359,8 +374,13 @@ export class WorldScene extends Phaser.Scene {
       .image(CAMP.x, CAMP.y + 70, this.playerKey)
       .setOrigin(0.5, 1)
       .setDepth(CAMP.y + 70);
-    this.player.setScale(1.15);
-    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+    this.player.setScale(PLAYER_SCALE);
+    // A gentle lerp keeps the follow smooth; a small deadzone lets the chieftain
+    // drift off dead-centre before the camera reacts, and movePlayer nudges the
+    // follow offset so the view leads slightly into wherever you're heading.
+    const cam = this.cameras.main;
+    cam.startFollow(this.player, true, 0.12, 0.12);
+    cam.setDeadzone(VIEW_W * 0.16, VIEW_H * 0.16);
   }
 
   private buildFog(): void {
@@ -1053,12 +1073,22 @@ export class WorldScene extends Phaser.Scene {
     }
 
     const len = Math.hypot(dx, dy);
-    const moving = len > 0.001;
+    // Target velocity: full speed along the desired heading, or zero when idle.
+    const tvx = len > 0.001 ? (dx / len) * PLAYER_SPEED : 0;
+    const tvy = len > 0.001 ? (dy / len) * PLAYER_SPEED : 0;
+    // Ease velocity toward the target — accelerating into motion, gliding out of
+    // it — so WASD taps and click destinations both land with a bit of weight.
+    const ramp = Math.min(1, (len > 0.001 ? PLAYER_ACCEL : PLAYER_DECEL) * sec);
+    this.vx += (tvx - this.vx) * ramp;
+    this.vy += (tvy - this.vy) * ramp;
+
+    const speed = Math.hypot(this.vx, this.vy);
+    const moving = speed > 3; // ignore the velocity tail once we've nearly stopped
     if (moving) {
-      const step = PLAYER_SPEED * sec;
-      const ux = dx / len;
-      const uy = dy / len;
-      // Try the straight path, then progressively wider angles, so click-to-move
+      const step = speed * sec;
+      const ux = this.vx / speed;
+      const uy = this.vy / speed;
+      // Try the straight path, then progressively wider angles, so movement
       // routes around a tree/rock instead of jamming into it.
       for (const a of [0, 0.4, -0.4, 0.9, -0.9, 1.4, -1.4]) {
         const cos = Math.cos(a);
@@ -1084,9 +1114,30 @@ export class WorldScene extends Phaser.Scene {
       const pose = HOMININ_WALK[this.animPhase];
       const fk = homininFrameKey(this.playerKey, pose);
       if (this.player.texture.key !== fk) this.player.setTexture(fk);
-    } else if (this.player.texture.key !== this.playerKey) {
-      this.player.setTexture(this.playerKey); // settle on the standing pose
+
+      // Footstep cadence: a subtle vertical bob, scaled by actual speed so it
+      // grows as you spin up and settles as you glide to a halt. The feet stay
+      // planted (origin is at the feet) — only the body bounces.
+      this.bobPhase += (speed / PLAYER_SPEED) * dt * 0.013;
+      const amp = 0.045 * Math.min(1, speed / PLAYER_SPEED);
+      this.player.scaleY = PLAYER_SCALE * (1 + Math.abs(Math.sin(this.bobPhase)) * amp);
+    } else {
+      this.vx = 0;
+      this.vy = 0;
+      this.player.scaleY += (PLAYER_SCALE - this.player.scaleY) * Math.min(1, 12 * sec);
+      if (this.player.texture.key !== this.playerKey) {
+        this.player.setTexture(this.playerKey); // settle on the standing pose
+      }
     }
+
+    // Camera lead: ease a follow offset in the direction of travel so the view
+    // shows a little more of what lies ahead than what's behind.
+    const tLeadX = speed > 3 ? (this.vx / speed) * CAMERA_LEAD : 0;
+    const tLeadY = speed > 3 ? (this.vy / speed) * CAMERA_LEAD : 0;
+    const leadRamp = Math.min(1, CAMERA_LEAD_LERP * sec);
+    this.leadX += (tLeadX - this.leadX) * leadRamp;
+    this.leadY += (tLeadY - this.leadY) * leadRamp;
+    this.cameras.main.setFollowOffset(-this.leadX, -this.leadY);
   }
 
   private revealFog(): void {
