@@ -68,7 +68,7 @@ import {
  * Current save-format version. Bump when the serialized shape changes and add a
  * matching step in {@link migrateSave} so older saves keep loading.
  */
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 /** The raw object {@link Simulation.serialize} writes / {@link Simulation.load} reads. */
 interface RawSave {
@@ -82,6 +82,12 @@ interface RawSave {
   epidemicRng?: number;
   nextId?: number;
   allocation?: TaskAllocation;
+  /**
+   * Opaque renderer-owned blob (the interactive WorldScene's player position,
+   * placed buildings, fog reveal, quest/gather counters). The pure sim never
+   * reads it; it only round-trips it. Absent on saves from before v3.
+   */
+  view?: unknown;
   // Migrated field-by-field, so older saves may be missing newer keys.
   state: Record<string, any>;
 }
@@ -95,8 +101,15 @@ interface RawSave {
 function migrateSave(data: RawSave): RawSave {
   const from = data.version ?? data.v ?? 1;
   if (from < 2) upgradeToV2(data);
+  if (from < 3) upgradeToV3(data);
   data.version = SAVE_VERSION;
   return data;
+}
+
+/** v2 → v3: the interactive WorldScene's view blob. Pre-v3 saves have none, so
+ *  default it to null and the renderer rebuilds a fresh world on load. */
+function upgradeToV3(data: RawSave): void {
+  data.view ??= null;
 }
 
 /** v1 → v2: default the quest, rival, scouting, raw-resource and tally fields. */
@@ -246,6 +259,13 @@ export class Simulation {
   private nextId = 1;
   state: SimState;
   allocation: TaskAllocation;
+  /**
+   * Opaque renderer-owned save payload (e.g. the interactive WorldScene's player
+   * position, placed buildings and fog reveal). The pure sim never reads or
+   * interprets it — it only round-trips it through {@link serialize}/{@link load}
+   * so the interactive session resumes. Older saves default it to null.
+   */
+  view: unknown = null;
 
   constructor(config: Partial<SimConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -1341,6 +1361,7 @@ export class Simulation {
       epidemicRng: this.epidemicRng.getState(),
       nextId: this.nextId,
       allocation: this.allocation,
+      view: this.view,
       state: { ...this.state, knowledge: this.state.knowledge.serialize(), culture: this.state.culture.serialize(), policies: this.state.policies.serialize(), settlements },
     });
   }
@@ -1355,6 +1376,7 @@ export class Simulation {
     if (typeof data.epidemicRng === "number") sim.epidemicRng.setState(data.epidemicRng);
     sim.nextId = data.nextId ?? sim.nextId;
     sim.allocation = data.allocation ?? sim.allocation;
+    sim.view = data.view ?? null;
     sim.state = {
       ...(data.state as unknown as SimState),
       knowledge: Knowledge.deserialize(data.state.knowledge),

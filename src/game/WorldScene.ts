@@ -188,6 +188,26 @@ interface Quest extends QuestSpec {
 }
 
 /**
+ * The interactive session, persisted alongside the pure sim's save as its opaque
+ * `view` blob (see {@link Simulation.view}). Captures everything the WorldScene
+ * owns that the sim does not: where the chieftain stands, the buildings placed,
+ * the fog lifted, and the gather/quest counters that drive objective progress.
+ */
+interface WorldView {
+  player: { x: number; y: number };
+  gathered: Record<ResKind, number>;
+  housing: number;
+  farmsBuilt: number;
+  farmHarvests: number;
+  talkedTo: number[];
+  regionExplored: Record<string, number>;
+  quests: { giverId: number; desc: string; state: Quest["state"]; start: number }[];
+  /** Indices (into the fog grid) of cells the player has revealed. */
+  fog: number[];
+  buildings: { kind: "campfire" | "hut" | "farm"; x: number; y: number; amount: number }[];
+}
+
+/**
  * The directly-playable world: you ARE the chieftain. Walk the camp and the
  * wilds (WASD or click-to-move), the camera follows you, fog-of-war lifts as you
  * explore, and clicking a tribe member opens a conversation. The pure evolution
@@ -264,6 +284,9 @@ export class WorldScene extends Phaser.Scene {
   private solids: { x: number; y: number; r: number }[] = [];
   private gatherables: Gatherable[] = [];
   private campfires: { x: number; y: number }[] = []; // fires villagers cluster at after dark
+  // Player-placed permanent buildings (huts/campfires), tracked for save/load.
+  // Farms live in `gatherables` (they deplete), so they are captured from there.
+  private placed: { kind: "campfire" | "hut"; x: number; y: number }[] = [];
   private gatherKey!: Phaser.Input.Keyboard.Key;
   private gatherCooldown = 0;
   // Diegetic audio: synthesized SFX + a biome/time-of-day ambient bed, silent
@@ -350,6 +373,10 @@ export class WorldScene extends Phaser.Scene {
 
   create(): void {
     this.ctrl = this.registry.get("controller") as GameController;
+    // Phaser reuses this scene instance across restarts (load reloads via
+    // scene.restart), so field initializers do not re-run — clear the per-run
+    // collections here so create() rebuilds the world from a clean slate.
+    this.resetWorldState();
     const biome = this.ctrl.sim.state.biome;
     this.audio.setBiome(biome); // colour the ambient bed for this world's biome
 
@@ -382,6 +409,7 @@ export class WorldScene extends Phaser.Scene {
     this.buildTechPanel();
     this.buildInspectCard();
     this.buildHelpOverlay();
+    this.buildSaveBar();
     // A grid-snapped footprint sits under the ghost so the placement cell — and
     // whether it is affordable (green) or not (red) — is unmistakable.
     this.ghostTile = this.add
@@ -420,6 +448,14 @@ export class WorldScene extends Phaser.Scene {
         }
         if (currentlyOver.some((o) => o.getData("muteBtn"))) {
           this.toggleMute();
+          return;
+        }
+        if (currentlyOver.some((o) => o.getData("saveBtn"))) {
+          this.saveGame();
+          return;
+        }
+        if (currentlyOver.some((o) => o.getData("loadBtn"))) {
+          this.loadGame();
           return;
         }
         if (currentlyOver.some((o) => o.getData("tutorialSkip"))) {
@@ -498,8 +534,14 @@ export class WorldScene extends Phaser.Scene {
       else if (e.key >= "1" && e.key <= "9") this.handleDigit(Number(e.key));
     });
 
+    // Resuming a saved session: the sim carries the WorldScene's view blob (null
+    // on a fresh run or a pre-v3 save), so restore the interactive state on top
+    // of the freshly-built world.
+    const view = this.ctrl.sim.view as WorldView | null;
+    if (view) this.applyView(view);
+
     // First run only: teach the core loop with a dismissible staged overlay.
-    if (!tutorialSeen()) this.startTutorial();
+    if (!view && !tutorialSeen()) this.startTutorial();
   }
 
   private key(name: string): Phaser.Input.Keyboard.Key {
@@ -1128,6 +1170,139 @@ export class WorldScene extends Phaser.Scene {
     });
   }
 
+  // ── save / load ──────────────────────────────────────────────────────────────
+
+  /** Two HUD buttons, just right of the build bar, to save and reload the run. */
+  private buildSaveBar(): void {
+    const y = VIEW_H - 50;
+    const x0 = 10 + BUILD_TYPES.length * 74 + 6; // sit beside the build bar
+    const mk = (i: number, label: string, key: string): void => {
+      const bx = x0 + i * 58;
+      const bg = this.add
+        .rectangle(bx, y, 54, 40, 0x12180e, 0.78)
+        .setOrigin(0, 0)
+        .setStrokeStyle(1, 0x6f8c5a)
+        .setScrollFactor(0)
+        .setDepth(UI_DEPTH)
+        .setInteractive({ useHandCursor: true });
+      bg.setData(key, true);
+      this.add
+        .text(bx + 27, y + 20, label, {
+          fontFamily: "monospace",
+          fontSize: "12px",
+          color: "#e9e0c8",
+          fontStyle: "bold",
+        })
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(UI_DEPTH + 1);
+    };
+    mk(0, "Save", "saveBtn");
+    mk(1, "Load", "loadBtn");
+  }
+
+  /** Persist the run: stash the WorldScene's view on the sim, then save it all. */
+  private saveGame(): void {
+    this.ctrl.sim.view = this.captureView();
+    this.ctrl.save();
+    this.flash("Game saved");
+  }
+
+  /** Reload the saved run and rebuild the world from it (scene restart). */
+  private loadGame(): void {
+    if (!this.ctrl.hasSave()) {
+      this.flash("No save found");
+      return;
+    }
+    if (this.ctrl.load()) this.scene.restart();
+    else this.flash("Load failed");
+  }
+
+  /** Snapshot the interactive session into the sim's opaque {@link WorldView}. */
+  private captureView(): WorldView {
+    const fog: number[] = [];
+    for (let i = 0; i < this.fogRevealed.length; i++) if (this.fogRevealed[i]) fog.push(i);
+    const farms = this.gatherables
+      .filter((g) => g.farm)
+      .map((g) => ({ kind: "farm" as const, x: g.sprite.x, y: g.sprite.y, amount: g.amount }));
+    return {
+      player: { x: this.player.x, y: this.player.y },
+      gathered: { ...this.gathered },
+      housing: this.housing,
+      farmsBuilt: this.farmsBuilt,
+      farmHarvests: this.farmHarvests,
+      talkedTo: [...this.talkedTo],
+      regionExplored: { ...this.regionExplored },
+      quests: this.quests.map((q) => ({ giverId: q.giverId, desc: q.desc, state: q.state, start: q.start })),
+      fog,
+      buildings: [...this.placed.map((b) => ({ ...b, amount: 0 })), ...farms],
+    };
+  }
+
+  /** Restore a captured {@link WorldView} onto the freshly-built world. */
+  private applyView(view: WorldView): void {
+    // Player position; clear transient movement so it does not drift after load.
+    this.player.setPosition(view.player.x, view.player.y).setDepth(view.player.y);
+    this.vx = 0;
+    this.vy = 0;
+    this.moveTarget = null;
+    this.cameras.main.centerOn(view.player.x, view.player.y);
+
+    // Placed buildings — recreate sprites + structural side-effects.
+    for (const b of view.buildings) this.spawnBuilding(b.kind, b.x, b.y, b.amount);
+
+    // Gather / quest progress counters.
+    this.gathered = { ...view.gathered };
+    this.housing = view.housing;
+    this.farmsBuilt = view.farmsBuilt;
+    this.farmHarvests = view.farmHarvests;
+    this.talkedTo = new Set(view.talkedTo);
+    this.regionExplored = { ...view.regionExplored };
+
+    // Quest states, matched to this run's givers (npcs reload identically).
+    for (const sq of view.quests) {
+      const q = this.quests.find((x) => x.giverId === sq.giverId && x.desc === sq.desc);
+      if (q) {
+        q.state = sq.state;
+        q.start = sq.start;
+      }
+    }
+
+    // Fog reveal — lift the saved cells outright (no tween, no region re-credit).
+    for (const i of view.fog) {
+      if (i >= 0 && i < this.fogRevealed.length && !this.fogRevealed[i]) {
+        this.fogRevealed[i] = true;
+        this.fogRemaining--;
+        this.fog[i].setAlpha(0);
+      }
+    }
+  }
+
+  /** Clear every per-run collection so create() rebuilds cleanly on restart. */
+  private resetWorldState(): void {
+    this.npcs = [];
+    this.inspectMarks = [];
+    this.notableMap = new Map();
+    this.fog = [];
+    this.fogRevealed = [];
+    this.fogRemaining = 0;
+    this.solids = [];
+    this.gatherables = [];
+    this.campfires = [];
+    this.nightLights = [];
+    this.placed = [];
+    this.quests = [];
+    this.questMarkers = new Map();
+    this.exploreRegions = [];
+    this.regionExplored = {};
+    this.buildBtns = [];
+    this.housing = 0;
+    this.farmsBuilt = 0;
+    this.farmHarvests = 0;
+    this.gathered = { wood: 0, food: 0, stone: 0 };
+    this.talkedTo = new Set();
+  }
+
   private toggleBuild(id: string, keyboard = false): void {
     const t = BUILD_TYPES.find((b) => b.id === id);
     if (!t) return;
@@ -1197,30 +1372,47 @@ export class WorldScene extends Phaser.Scene {
     }
     res[t.cost.res] -= t.cost.amount;
     if (t.id === "farm") {
-      // A farm is flat ground you walk over — and a renewable food source.
-      const crop = this.add.image(wx, wy, "crop").setDepth(2);
-      this.raiseIn(crop);
-      this.gatherables.push({ sprite: crop, kind: "food", amount: 12, farm: true });
+      this.spawnBuilding("farm", wx, wy, 12);
       this.farmsBuilt += 1;
       this.flash("Farm built — Space to harvest food");
+    } else if (t.id === "hut") {
+      this.spawnBuilding("hut", wx, wy, 0);
+      this.housing += 1; // shelter for more of the tribe
+      this.flash("Hut built — +1 housing");
+      this.tutorialEvent("build");
     } else {
-      const spr = this.add.image(wx, wy, t.icon).setOrigin(0.5, 0.9).setDepth(wy);
-      this.raiseIn(spr);
-      if (t.id === "hut") {
-        this.housing += 1; // shelter for more of the tribe
-        this.solids.push({ x: wx, y: wy, r: 10 });
-        this.addNightGlow(wx, wy - 6, 30, 22, 0xffd27a, 0.45, false); // a lit window after dark
-        this.flash("Hut built — +1 housing");
-        this.tutorialEvent("build");
-      } else {
-        this.addNightGlow(wx, wy, 72, 42, 0xffb066, 0.5, true); // campfire's warm glow, lit at night
-        this.campfires.push({ x: wx, y: wy }); // villagers will gather here after dark
-        this.flash("Campfire built — warmth");
-      }
+      this.spawnBuilding("campfire", wx, wy, 0);
+      this.flash("Campfire built — warmth");
     }
     this.dustBurst(wx, wy); // a kick of dust as it lands
     this.audio.build(true);
     this.positionGhost(wx, wy); // refresh the affordability tint after spending
+  }
+
+  /**
+   * Create a placed building's sprite and structural side-effects — but not the
+   * resource charge, counters or placement juice. Shared by {@link tryPlace} and
+   * save-load restore so a loaded world rebuilds exactly what was built.
+   */
+  private spawnBuilding(kind: "campfire" | "hut" | "farm", wx: number, wy: number, amount: number): void {
+    if (kind === "farm") {
+      // A farm is flat ground you walk over — and a renewable food source.
+      const crop = this.add.image(wx, wy, "crop").setDepth(2);
+      this.raiseIn(crop);
+      this.gatherables.push({ sprite: crop, kind: "food", amount, farm: true });
+      return;
+    }
+    const icon = kind === "hut" ? "shelter-hut" : "fire-0";
+    const spr = this.add.image(wx, wy, icon).setOrigin(0.5, 0.9).setDepth(wy);
+    this.raiseIn(spr);
+    if (kind === "hut") {
+      this.solids.push({ x: wx, y: wy, r: 10 });
+      this.addNightGlow(wx, wy - 6, 30, 22, 0xffd27a, 0.45, false); // a lit window after dark
+    } else {
+      this.addNightGlow(wx, wy, 72, 42, 0xffb066, 0.5, true); // campfire's warm glow, lit at night
+      this.campfires.push({ x: wx, y: wy }); // villagers will gather here after dark
+    }
+    this.placed.push({ kind, x: wx, y: wy });
   }
 
   /** Refuse a placement loudly: reason text, a red ghost shake, and a low buzz. */

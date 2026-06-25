@@ -66,6 +66,45 @@ describe("save / load", () => {
   });
 });
 
+describe("interactive view blob", () => {
+  it("round-trips the renderer's opaque view payload", () => {
+    const a = new Simulation({ seed: 4, startingPopulation: 12 });
+    for (let i = 0; i < 40; i++) step(a);
+
+    // A WorldScene-shaped snapshot: player position, placed buildings, fog reveal,
+    // gathered resources and quest state. The sim treats it as opaque data.
+    a.view = {
+      player: { x: 812, y: 645 },
+      gathered: { wood: 7, food: 3, stone: 4 },
+      housing: 1,
+      farmsBuilt: 1,
+      farmHarvests: 2,
+      talkedTo: [1, 2, 3],
+      regionExplored: { "the eastern ridge": 6 },
+      quests: [{ giverId: 1, state: "ready", start: 0 }],
+      fog: [0, 1, 2, 17, 18],
+      buildings: [
+        { kind: "hut", x: 800, y: 600 },
+        { kind: "farm", x: 864, y: 600, amount: 9 },
+      ],
+    };
+
+    const b = Simulation.load(a.serialize());
+    expect(b.view).toEqual(a.view);
+  });
+
+  it("defaults the view to null when absent (older saves and fresh runs)", () => {
+    const fresh = new Simulation({ seed: 8 });
+    expect(fresh.view).toBeNull();
+
+    // A save written before the view field existed has no `view` key at all.
+    const data = JSON.parse(fresh.serialize());
+    delete data.view;
+    const loaded = Simulation.load(JSON.stringify(data));
+    expect(loaded.view).toBeNull();
+  });
+});
+
 describe("versioned save migration", () => {
   it("loads a prior-version save, defaulting the newer systems", () => {
     const a = new Simulation({ seed: 7, startingPopulation: 10 });
