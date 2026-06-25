@@ -24,6 +24,7 @@ import { ChronicleView } from "./chronicle.js";
 import { keyboardShortcut } from "./shortcuts.js";
 import { eraSpans, traitDeltas, summaryHTML, type EraEntry } from "./summary.js";
 import { questLogHTML } from "./quests.js";
+import { diplomacyPanelHTML } from "./diplomacy.js";
 import { codexHTML } from "./codex.js";
 import { CODEX_ENTRIES, isUnlocked, type CodexContext } from "../sim/index.js";
 
@@ -208,6 +209,11 @@ export class UIOverlay {
       </div>
 
       <div class="panel">
+        <h2>Neighbours <span class="dim" data-el="rival-count"></span></h2>
+        <div class="rivals" data-el="rivals"></div>
+      </div>
+
+      <div class="panel">
         <h2>Codex <span class="dim" data-el="codex-count"></span></h2>
         <div class="codex" data-el="codex"></div>
       </div>
@@ -272,7 +278,7 @@ export class UIOverlay {
     for (const k of [
       "era", "year", "gen", "pop", "season", "goal", "goal-text", "eratrack", "resources", "legacy", "difficulty",
       "traits", "graph", "labor", "tasks", "lang", "techtree", "badges", "ach-count",
-      "quests", "quest-count", "codex", "codex-count", "log",
+      "quests", "quest-count", "rivals", "rival-count", "codex", "codex-count", "log",
       "encounter", "encounter-text", "choice", "choice-title", "choice-text",
       "endscreen", "end-title", "end-body", "end-summary", "end-card", "tutorial",
     ]) {
@@ -333,6 +339,8 @@ export class UIOverlay {
       if (a === "interbreed-no") { this.ctrl.resolveEncounter(false); this.ctrl.paused = false; }
       if (a === "choice-0") { this.ctrl.resolveChoice(0); this.ctrl.paused = false; }
       if (a === "choice-1") { this.ctrl.resolveChoice(1); this.ctrl.paused = false; }
+      if (a === "diplo-0") { this.ctrl.resolveChoice(0); this.ctrl.paused = false; }
+      if (a === "diplo-1") { this.ctrl.resolveChoice(1); this.ctrl.paused = false; }
       if (a === "tutorial-ok") { this.el.tutorial.classList.add("hidden"); localStorage.setItem(TUTORIAL_KEY, "1"); }
       if (a === "goal-dismiss") {
         localStorage.setItem(GOAL_NUDGE_KEY, this.el["goal-text"].textContent || "");
@@ -418,6 +426,7 @@ export class UIOverlay {
     this.renderTechTree(s);
     this.renderBadges();
     this.renderQuests(s);
+    this.renderDiplomacy(s);
     this.renderCodex(s);
     this.sampleAndDrawGraph(avg.count, avg.traits.intelligence);
 
@@ -530,6 +539,24 @@ export class UIOverlay {
       }
     }
     this.questsPrimed = true;
+  }
+
+  /**
+   * Render the Neighbours panel from sim state: every rival with its disposition
+   * and built relations, plus action buttons for whichever rival has an open
+   * diplomacy offer. A pure read of `s.rivals`/`s.pendingChoice`; the buttons
+   * resolve through the sim's `resolveChoice`. Re-rendered every frame so a fresh
+   * offer surfaces immediately.
+   */
+  private renderDiplomacy(s: GameController["sim"]["state"]): void {
+    this.el["rival-count"].textContent = `(${s.rivals.length})`;
+    // Only a diplomacy choice (one carrying a rivalId) drives the panel actions.
+    const offer = s.pendingChoice && s.pendingChoice.rivalId ? s.pendingChoice : null;
+    this.el.rivals.innerHTML = diplomacyPanelHTML(
+      s.rivals,
+      (id) => regionById(id).name,
+      offer,
+    );
   }
 
   private lastCodexSig = "";

@@ -157,6 +157,27 @@ button.big { font-weight: 700; padding: 7px 14px; }
 .quest.done .qprog i { background: var(--good); }
 .quest-n { font-size: 10px; color: var(--ink-dim); font-variant-numeric: tabular-nums; float: right; margin-top: 2px; }
 
+/* neighbours / diplomacy */
+.rivals { display: flex; flex-direction: column; gap: 8px; }
+.rival-empty { font-size: 11px; color: var(--ink-dim); }
+.rival {
+  padding: 6px 8px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--panel2);
+}
+.rival-h { display: flex; align-items: baseline; gap: 6px; }
+.rival-disp { font-size: 13px; }
+.rival-name { font-size: 12px; font-weight: 600; color: var(--ink); }
+.rival-where { font-size: 10px; color: var(--ink-dim); margin-left: auto; }
+.rival-rel { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.rival-rel-bar { flex: 1 1 auto; height: 4px; background: #1d150e; border-radius: 3px; overflow: hidden; }
+.rival-rel-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--bad), var(--good)); transition: width 0.4s ease; }
+.rival-rel-v { font-size: 10px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.rival-offer { margin-top: 6px; }
+.rival-offer-t { font-size: 11px; color: var(--accent); }
+.rival-actions { display: flex; gap: 6px; margin-top: 4px; }
+.rival-actions button { flex: 1 1 0; font-size: 11px; }
+.rivalmarker circle { stroke: #2a2018; stroke-width: 0.6; }
+
 /* lore codex */
 .codex { display: flex; flex-direction: column; gap: 10px; }
 .codex-group { display: flex; flex-direction: column; gap: 6px; }

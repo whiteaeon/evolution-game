@@ -1,5 +1,6 @@
 import type { GameController } from "../game/controller.js";
 import { REGIONS, BIOME_PROFILE, regionById, type Biome } from "../sim/index.js";
+import { dispositionStyle } from "./diplomacy.js";
 
 const BIOME_COLOR: Record<Biome, string> = {
   tundra: "#cfe0e8",
@@ -90,7 +91,18 @@ export class MapView {
         <text y="-6">${r.name}</text>
       </g>`;
     }).join("");
-    svg.innerHTML = edges + nodes;
+    // Neighbour tribes: a disposition-coloured marker at each rival's home region.
+    const rivals = this.ctrl.sim.state.rivals
+      .map((rv) => {
+        const reg = regionById(rv.homeRegion);
+        const disp = dispositionStyle(rv.disposition);
+        return `<g class="rivalmarker" data-disp="${disp.key}" transform="translate(${reg.x * 100 + 5},${reg.y * 72 - 5})">
+          <circle r="2.4" fill="${disp.color}" />
+          <title>${rv.name} — ${disp.label} (relations ${rv.relations.toFixed(2)})</title>
+        </g>`;
+      })
+      .join("");
+    svg.innerHTML = edges + nodes + rivals;
 
     const info = this.host.querySelector('[data-el="info"]') as HTMLElement;
     const btn = this.host.querySelector('[data-act="migrate"]') as HTMLButtonElement;
