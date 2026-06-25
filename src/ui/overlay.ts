@@ -6,10 +6,13 @@ import {
   TASKS,
   DIFFICULTIES,
   DIFFICULTY_PRESETS,
+  SCENARIOS,
+  SCENARIO_PRESETS,
   QUEST_DEFS,
   POLICY_AXES,
   regionById,
   type Difficulty,
+  type Scenario,
   type Era,
   type QuestId,
   type Task,
@@ -175,6 +178,14 @@ export class UIOverlay {
           <button data-act="load">📂 Load</button>
           <button data-act="new">🔄 New</button>
         </div>
+        <label class="newrun">Scenario (next run)
+          <select data-el="scenario">
+            ${SCENARIOS.map(
+              (s) =>
+                `<option value="${s}"${s === "valley" ? " selected" : ""} title="${SCENARIO_PRESETS[s].blurb}">${SCENARIO_PRESETS[s].label}</option>`,
+            ).join("")}
+          </select>
+        </label>
         <label class="newrun">Difficulty (next run)
           <select data-el="difficulty">
             ${DIFFICULTIES.map(
@@ -288,7 +299,7 @@ export class UIOverlay {
 
     const q = (sel: string) => this.root.querySelector(sel) as HTMLElement;
     for (const k of [
-      "era", "year", "gen", "pop", "season", "goal", "goal-text", "eratrack", "resources", "legacy", "difficulty",
+      "era", "year", "gen", "pop", "season", "goal", "goal-text", "eratrack", "resources", "legacy", "difficulty", "scenario",
       "traits", "graph", "labor", "tasks", "lang", "policies", "techtree", "badges", "ach-count",
       "quests", "quest-count", "rivals", "rival-count", "codex", "codex-count", "log",
       "encounter", "encounter-text", "choice", "choice-title", "choice-text",
@@ -331,6 +342,10 @@ export class UIOverlay {
   }
 
   private bind(): void {
+    (this.el.scenario as HTMLSelectElement).addEventListener("change", (e) => {
+      this.ctrl.setScenario((e.target as HTMLSelectElement).value as Scenario);
+      this.audio.click();
+    });
     (this.el.difficulty as HTMLSelectElement).addEventListener("change", (e) => {
       this.ctrl.setDifficulty((e.target as HTMLSelectElement).value as Difficulty);
       this.audio.click();
