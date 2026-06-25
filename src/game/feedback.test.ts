@@ -5,6 +5,8 @@ import {
   BURST_STYLE,
   dustBurstCount,
   DUST_BURST_BASE,
+  buildThudShake,
+  BUILD_THUD_BASE,
   gatherBurstCount,
   GATHER_BURST_BASE,
   questCelebrationCount,
@@ -102,6 +104,15 @@ describe("event feedback routing", () => {
     expect(dustBurstCount(15)).toBeGreaterThan(dustBurstCount(5)); // a pricier build kicks more dust
     expect(dustBurstCount(0)).toBe(DUST_BURST_BASE); // a free build → baseline, never below it
     expect(dustBurstCount(1000)).toBeLessThanOrEqual(16); // never floods the scene
+  });
+
+  it("swells the building landing thud with its cost, but keeps it gentle", () => {
+    expect(buildThudShake(5)).toBeCloseTo(BUILD_THUD_BASE + 0.0005); // a 5-wood campfire → floor(5/5) bonus
+    expect(buildThudShake(15)).toBeCloseTo(BUILD_THUD_BASE + 0.0015); // a 15-wood hut thuds down harder
+    expect(buildThudShake(15)).toBeGreaterThan(buildThudShake(5)); // a pricier build kicks harder
+    expect(buildThudShake(0)).toBe(BUILD_THUD_BASE); // a free build → baseline, never below it
+    expect(buildThudShake(1000)).toBeLessThanOrEqual(0.005); // capped gentle
+    expect(buildThudShake(1000)).toBeLessThan(0.006); // never out-shakes a raid resolution
   });
 
   it("formats the study confirmation as a spend→insight note", () => {

@@ -37,7 +37,7 @@ import { footstepDust } from "./footstepDust.js";
 import { nightGlowAlpha } from "./nightGlow.js";
 import { isBlocked, removeSolid, type Solid } from "./solids.js";
 import { checkPlacement } from "./buildPlacement.js";
-import { acceptCelebrationCount, BURST_STYLE, buildSpendText, dustBurstCount, gatherBurstCount, questCelebrationCount, questRingScale, raidCelebrationCount, raidPlunderText, rallyBurstCount, studyFloatText } from "./feedback.js";
+import { acceptCelebrationCount, BURST_STYLE, buildSpendText, BUILD_THUD_MS, buildThudShake, dustBurstCount, gatherBurstCount, questCelebrationCount, questRingScale, raidCelebrationCount, raidPlunderText, rallyBurstCount, studyFloatText } from "./feedback.js";
 import {
   TUTORIAL_STEPS,
   advanceTutorial,
@@ -1691,6 +1691,7 @@ export class WorldScene extends Phaser.Scene {
       this.flash("Campfire built — warmth");
     }
     this.dustBurst(wx, wy, dustBurstCount(t.cost.amount)); // a kick of dust as it lands — fatter for a pricier build
+    this.cameras.main.shake(BUILD_THUD_MS, buildThudShake(t.cost.amount)); // a brief landing thud, firmer for a pricier build
     this.floatGain(wx, wy - 18, buildSpendText(t.cost.amount, t.cost.res), SPEND_TEXT); // confirm the cost debited
     this.audio.build(true);
     this.positionGhost(wx, wy); // refresh the affordability tint after spending
