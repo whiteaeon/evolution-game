@@ -20,8 +20,8 @@ export interface TutorialStep {
 export const TUTORIAL_STEPS: readonly TutorialStep[] = [
   { event: "move", text: "Move with WASD, or click the ground to walk there." },
   { event: "gather", text: "Walk up to a tree and press Space to gather wood." },
-  { event: "build", text: "Open the build bar (bottom-left), pick the Hut, and click to place it." },
-  { event: "quest", text: "Find a villager marked ! and click them to take a quest." },
+  { event: "build", text: "Press 2 (or click the build bar, bottom-left) to pick the Hut, then Enter or click to place it." },
+  { event: "quest", text: "Find a villager marked ! — press E nearby, or click them — to take a quest." },
 ];
 
 /**
