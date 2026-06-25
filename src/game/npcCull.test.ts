@@ -28,4 +28,13 @@ describe("npcOnScreen", () => {
     expect(npcOnScreen(400, 200, view)).toBe(true);
     expect(npcOnScreen(view.x + view.width + (NPC_CULL_MARGIN + 1), 200, view)).toBe(false);
   });
+
+  it("gates quest-marker re-placement by the giver villager's position", () => {
+    // updateQuests reuses this predicate against the quest giver's sprite: the
+    // marker's per-frame setText/setColor/setPosition/setDepth is skipped while
+    // the giver is off-screen (the HUD tracker still surfaces the quest), and
+    // resumes the frame the giver scrolls back into view.
+    expect(npcOnScreen(400, 200, view)).toBe(true);
+    expect(npcOnScreen(view.x - (NPC_CULL_MARGIN + 1), 200, view)).toBe(false);
+  });
 });

@@ -2060,12 +2060,18 @@ export class WorldScene extends Phaser.Scene {
     // would otherwise rebuild a metrics object on every call (twice per quest).
     const metrics = this.questMetrics();
     const progress = (q: Quest) => questMetric(q, metrics) - q.start;
+    const view = this.cameras.main.worldView;
     let tracker = "";
     for (const q of this.quests) {
       if (q.state === "active" && progress(q) >= q.target) q.state = "ready";
       const marker = this.questMarkers.get(q.giverId);
       const giver = this.npcs.find((n) => n.ind.id === q.giverId);
-      if (marker && giver) {
+      // The marker rides its giver, which only moves on-screen (updateNpcs culls
+      // off-screen villagers), so skip its per-frame re-place while the giver is
+      // off-screen — corrected the frame it scrolls back in, since update runs
+      // before render. Matches updateInspectMarks; the HUD tracker below is
+      // unaffected and still surfaces off-screen quests.
+      if (marker && giver && npcOnScreen(giver.sprite.x, giver.sprite.y, view)) {
         // Colourblind-safe: a distinct glyph AND colour per state, not hue alone.
         const style =
           q.state === "available"
