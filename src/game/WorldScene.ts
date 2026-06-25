@@ -35,7 +35,7 @@ import { footstepDust } from "./footstepDust.js";
 import { nightGlowAlpha } from "./nightGlow.js";
 import { isBlocked, removeSolid, type Solid } from "./solids.js";
 import { checkPlacement } from "./buildPlacement.js";
-import { acceptCelebrationCount, BURST_STYLE, buildSpendText, dustBurstCount, gatherBurstCount, questCelebrationCount, questRingScale, raidCelebrationCount, rallyBurstCount, studyFloatText } from "./feedback.js";
+import { acceptCelebrationCount, BURST_STYLE, buildSpendText, dustBurstCount, gatherBurstCount, questCelebrationCount, questRingScale, raidCelebrationCount, raidPlunderText, rallyBurstCount, studyFloatText } from "./feedback.js";
 import {
   TUTORIAL_STEPS,
   advanceTutorial,
@@ -3180,6 +3180,11 @@ export class WorldScene extends Phaser.Scene {
     if (outcome.plunder > 0) {
       sim.state.resources.food = Math.max(0, sim.state.resources.food - outcome.plunder);
     }
+
+    // Confirm a plundered-food loss in-world at the hearth, like every other
+    // resource change pops a float — a breach used to show it only in the banner.
+    const plunderText = raidPlunderText(outcome.plunder);
+    if (plunderText) this.floatGain(CAMP.x, CAMP.y - 6, plunderText, SPEND_TEXT);
 
     this.cameras.main.shake(260, 0.006);
     this.popParticles(
