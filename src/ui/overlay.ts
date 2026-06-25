@@ -81,6 +81,7 @@ export class UIOverlay {
   private lastEra = "";
   private lastBirths = -1;
   private lastDiscovered = -1;
+  private lastLogLen = -1;
   private graphCtx: CanvasRenderingContext2D | null = null;
   private map: MapView;
   private tree: FamilyTree;
@@ -547,6 +548,17 @@ export class UIOverlay {
     if (this.lastDiscovered >= 0 && discovered > this.lastDiscovered) this.audio.discovery();
     this.lastBirths = s.totals.births;
     this.lastDiscovered = discovered;
+
+    // dramatic toll the frame raiders strike — scan only the newly-logged events
+    if (this.lastLogLen >= 0) {
+      for (let i = this.lastLogLen; i < s.log.length; i++) {
+        if (s.log[i].type === "raid") {
+          this.audio.knell();
+          break;
+        }
+      }
+    }
+    this.lastLogLen = s.log.length;
     this.renderEndScreen(s, avg.count);
   }
 
