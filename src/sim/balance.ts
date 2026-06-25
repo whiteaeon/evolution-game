@@ -11,6 +11,7 @@ export const BALANCE = {
   researchCompression: 0.5, // sub-linear exponent on the aggregate research multiplier
   researchCrowding: 0.82, // diminishing returns as the research team grows (coordination cost)
   buildBase: 1.0,
+  materialsPerBuild: 0.2, // worked goods produced per unit of build labour (alongside the structure)
   // Carryable raw resources gathered per worker, scaled by per-biome availability
   // (see BiomeProfile.wood/stone/hide). Builders cut wood + quarry stone; hunters
   // take hide from the game they bring down.
