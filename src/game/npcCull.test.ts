@@ -20,4 +20,12 @@ describe("npcOnScreen", () => {
     const beyond = view.x + view.width + (NPC_CULL_MARGIN + 1);
     expect(npcOnScreen(beyond, 200, view)).toBe(false);
   });
+
+  it("gates leader/notable marker re-placement by the marker's villager anchor", () => {
+    // updateInspectMarks reuses this predicate against the marker's sprite (the
+    // villager it rides): on-screen anchors get repositioned, off-screen ones are
+    // skipped until they scroll back in.
+    expect(npcOnScreen(400, 200, view)).toBe(true);
+    expect(npcOnScreen(view.x + view.width + (NPC_CULL_MARGIN + 1), 200, view)).toBe(false);
+  });
 });

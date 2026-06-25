@@ -3565,7 +3565,13 @@ export class WorldScene extends Phaser.Scene {
   /** Float each leader/notable marker above its (moving) villager, gently bobbing. */
   private updateInspectMarks(): void {
     const bob = Math.sin(this.time.now / 320) * 2;
+    const view = this.cameras.main.worldView;
     for (const m of this.inspectMarks) {
+      // Markers ride their villager, which only moves while on-screen (updateNpcs
+      // culls off-screen NPCs), so a marker off-screen has nothing to re-place.
+      // Skip its per-frame setPosition/setDepth until it scrolls back into view —
+      // update runs before render, so one scrolling in is corrected the same frame.
+      if (!npcOnScreen(m.sprite.x, m.sprite.y, view)) continue;
       m.marker
         .setPosition(m.sprite.x, m.sprite.y - m.sprite.displayHeight - 8 + bob)
         .setDepth(m.sprite.y + 2);
