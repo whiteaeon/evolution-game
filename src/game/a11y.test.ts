@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { CONTROLS, QUEST_MARKER, BUILD_MARKER, movementLocked } from "./a11y.js";
+import {
+  CONTROLS,
+  QUEST_MARKER,
+  QUEST_MARKER_LEGEND,
+  BUILD_MARKER,
+  movementLocked,
+} from "./a11y.js";
 
 describe("CONTROLS help listing", () => {
   it("documents every core keyboard-only action", () => {
@@ -54,6 +60,24 @@ describe("QUEST_MARKER colourblind safety", () => {
     for (const m of Object.values(QUEST_MARKER)) {
       expect(m.glyph.length).toBeGreaterThan(0);
       expect(m.color).toMatch(/^#[0-9a-f]{6}$/i);
+    }
+  });
+});
+
+describe("QUEST_MARKER_LEGEND (help overlay explains the markers)", () => {
+  it("covers both visible quest-marker states", () => {
+    expect(QUEST_MARKER_LEGEND.length).toBe(2);
+  });
+
+  it("stays in sync with QUEST_MARKER's glyphs and colours", () => {
+    const styles = QUEST_MARKER_LEGEND.map((e) => `${e.glyph}|${e.color}`);
+    expect(styles).toContain(`${QUEST_MARKER.available.glyph}|${QUEST_MARKER.available.color}`);
+    expect(styles).toContain(`${QUEST_MARKER.ready.glyph}|${QUEST_MARKER.ready.color}`);
+  });
+
+  it("gives every marker a non-empty plain-language meaning", () => {
+    for (const e of QUEST_MARKER_LEGEND) {
+      expect(e.meaning.trim().length).toBeGreaterThan(0);
     }
   });
 });

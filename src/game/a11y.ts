@@ -72,3 +72,20 @@ export const BUILD_MARKER: Record<"ok" | "blocked", MarkerStyle> = {
   ok: { glyph: "✓", color: "#6fe07a" }, // green check — affordable, place here
   blocked: { glyph: "✕", color: "#ff5a5a" }, // red cross — can't afford it
 };
+
+/** One row of the marker legend in the help overlay: a styled glyph and its meaning. */
+export interface LegendEntry extends MarkerStyle {
+  meaning: string;
+}
+
+/**
+ * What the floating quest markers over villagers actually mean. Derived from
+ * {@link QUEST_MARKER} so the legend can never drift from the glyphs/colours the
+ * world draws. The help overlay lists the controls but, without this, never says
+ * what "!" and "✓" stand for — and that text+glyph pairing is exactly what a
+ * colourblind player leans on instead of the hue.
+ */
+export const QUEST_MARKER_LEGEND: readonly LegendEntry[] = [
+  { ...QUEST_MARKER.available, meaning: "Quest on offer — press E to take it" },
+  { ...QUEST_MARKER.ready, meaning: "Quest done — return to turn it in" },
+];
