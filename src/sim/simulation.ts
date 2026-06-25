@@ -4,6 +4,7 @@ import { individualName } from "./naming.js";
 import { selectLeader, leaderBonus } from "./leadership.js";
 import { pickDialogueLine, type DialogueSituation } from "./dialogue.js";
 import { Knowledge, TECH_TREE, TECH_ORDER, eraCapstone } from "./knowledge.js";
+import { Culture } from "./culture.js";
 import {
   BIOME_PROFILE,
   DEFAULT_REGION,
@@ -129,6 +130,10 @@ const BALANCE = {
   diploTradeMaterials: 12, // materials gained trading food for goods
   diploTradeInsight: 30, // research points gained trading food for knowledge
   diploTradeRelUp: 0.1, // relations warmed a little by a fair trade
+  // Belief track: culture accrues passively from each discovered culture-category
+  // tech (burial/art/republic…) and in chunks from ritual event chains.
+  culturePerCultureTech: 0.2, // culture per discovered culture-tech, per tick
+  cultureRitual: 14, // culture from resolving a ritual/belief event chain
 };
 
 interface ShelterDef {
@@ -295,6 +300,8 @@ export interface SimState {
   individuals: Individual[];
   resources: ResourcePools;
   knowledge: Knowledge;
+  /** Cumulative belief track, parallel to the language chain (see {@link Culture}). */
+  culture: Culture;
   world: WorldState;
   shelter: Shelter;
   region: string;
@@ -414,6 +421,7 @@ export class Simulation {
       individuals,
       resources,
       knowledge,
+      culture: new Culture(),
       world: { cold: this.config.baseCold, abundance: 1, season: 0, seasonIndex: 0 },
       shelter: "cave",
       region: region.id,
@@ -725,10 +733,12 @@ export class Simulation {
     s.tick++;
 
     const effects = s.knowledge.aggregateEffects();
+    s.culture.foldInto(effects); // belief cohesion, aggregated into the same bundle
     this.applyLeaderBonus(effects);
     this.updateWorld(effects);
     this.distributeWorkers();
     this.produce(effects);
+    this.accrueCulture();
     this.advanceScouting();
     this.consumeAndUpdateNeeds(effects);
     const popBeforeDeaths = this.living.length;
@@ -911,6 +921,34 @@ export class Simulation {
     if (avail.length === 0) return null;
     for (const t of TECH_ORDER) if (avail.includes(t)) return t;
     return avail[0];
+  }
+
+  /**
+   * Accrue belief: every discovered culture-category tech (burial, art, …) feeds
+   * the track a little each tick. When the accrual crosses a stage threshold the
+   * tribe reaches a new belief stage — a belief-flavored milestone event. This is
+   * deterministic (no RNG draw), so it never perturbs any existing run or replay.
+   */
+  private accrueCulture(): void {
+    let rate = 0;
+    for (const id of this.state.knowledge.discovered) {
+      if (TECH_TREE[id].category === "culture") rate += BALANCE.culturePerCultureTech;
+    }
+    if (rate > 0) this.gainCulture(rate);
+  }
+
+  /**
+   * Add belief points, logging a belief-flavored milestone whenever the accrual
+   * crosses into a new stage — whatever the source (passive cultural techs or a
+   * ritual event chain). Deterministic; never touches the RNG stream.
+   */
+  private gainCulture(amount: number): void {
+    const s = this.state;
+    const before = s.culture.level();
+    s.culture.accrue(amount);
+    if (s.culture.level() > before) {
+      this.logEvent("milestone", `The tribe embraces ${s.culture.stage()!.name} — belief binds them closer.`);
+    }
   }
 
   /**
@@ -1328,6 +1366,7 @@ export class Simulation {
         }
         break;
       case "prophet":
+        this.gainCulture(BALANCE.cultureRitual); // a ritual deepens the tribe's belief
         if (risky) {
           this.grantInsight(40);
           const lost = this.applyHazard("intelligence", BALANCE.diseaseLethality);
@@ -1382,6 +1421,7 @@ export class Simulation {
         }
         break;
       case "sacredSite":
+        this.gainCulture(BALANCE.cultureRitual); // honouring the sacred ground deepens belief
         if (risky) {
           const gain = 8 * s.world.abundance;
           s.resources.materials += 10;
@@ -1938,7 +1978,7 @@ export class Simulation {
       settlementRng: this.settlementRng.getState(),
       nextId: this.nextId,
       allocation: this.allocation,
-      state: { ...this.state, knowledge: this.state.knowledge.serialize(), settlements },
+      state: { ...this.state, knowledge: this.state.knowledge.serialize(), culture: this.state.culture.serialize(), settlements },
     });
   }
 
@@ -1951,7 +1991,11 @@ export class Simulation {
     if (typeof data.settlementRng === "number") sim.settlementRng.setState(data.settlementRng);
     sim.nextId = data.nextId;
     sim.allocation = data.allocation;
-    sim.state = { ...data.state, knowledge: Knowledge.deserialize(data.state.knowledge) };
+    sim.state = {
+      ...data.state,
+      knowledge: Knowledge.deserialize(data.state.knowledge),
+      culture: Culture.deserialize(data.state.culture),
+    };
     if (!sim.state.rivals) sim.state.rivals = [];
     if (!sim.state.discoveredRegions) sim.state.discoveredRegions = [sim.state.region];
     if (typeof sim.state.scouts !== "number") sim.state.scouts = 0;
