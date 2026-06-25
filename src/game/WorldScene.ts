@@ -33,7 +33,7 @@ import { particleBudget } from "./particleBudget.js";
 import { footstepDust } from "./footstepDust.js";
 import { nightGlowAlpha } from "./nightGlow.js";
 import { isBlocked, removeSolid, type Solid } from "./solids.js";
-import { acceptCelebrationCount, BURST_STYLE, dustBurstCount, gatherBurstCount, questCelebrationCount, questRingScale, raidCelebrationCount, rallyBurstCount, studyFloatText } from "./feedback.js";
+import { acceptCelebrationCount, BURST_STYLE, buildSpendText, dustBurstCount, gatherBurstCount, questCelebrationCount, questRingScale, raidCelebrationCount, rallyBurstCount, studyFloatText } from "./feedback.js";
 import {
   TUTORIAL_STEPS,
   advanceTutorial,
@@ -199,6 +199,8 @@ const RAID_PLUNDER_FOOD = 20; // most food raiders carry off (scaled by how badl
 const RES_COLOR: Record<ResKind, number> = { wood: 0xb5793b, food: 0x6fcf57, stone: 0xc2c6cf };
 /** Floating-gain text colour per resource (a brighter sibling of the particle). */
 const RES_TEXT: Record<ResKind, string> = { wood: "#e0a060", food: "#9fe070", stone: "#d6dae6" };
+/** Floating-text colour for a resource debit (a build's cost), distinct from the warm gain tones. */
+const SPEND_TEXT = "#ff9a9a";
 /** Slack around the camera before a decorative burst is culled as off-screen. */
 const PARTICLE_CULL_MARGIN = 48;
 /** Hard ceiling on simultaneously-alive decorative dots, so overlapping bursts
@@ -1664,6 +1666,7 @@ export class WorldScene extends Phaser.Scene {
       this.flash("Campfire built — warmth");
     }
     this.dustBurst(wx, wy, dustBurstCount(t.cost.amount)); // a kick of dust as it lands — fatter for a pricier build
+    this.floatGain(wx, wy - 18, buildSpendText(t.cost.amount, t.cost.res), SPEND_TEXT); // confirm the cost debited
     this.audio.build(true);
     this.positionGhost(wx, wy); // refresh the affordability tint after spending
   }

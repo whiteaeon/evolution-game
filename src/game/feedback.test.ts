@@ -13,6 +13,7 @@ import {
   raidCelebrationCount,
   rallyBurstCount,
   studyFloatText,
+  buildSpendText,
   type FeedbackKind,
 } from "./feedback.js";
 
@@ -105,6 +106,12 @@ describe("event feedback routing", () => {
   it("formats the study confirmation as a spend→insight note", () => {
     expect(studyFloatText(5, 30)).toBe("−5 food → +30 insight");
     expect(studyFloatText(8, 50)).toBe("−8 food → +50 insight");
+  });
+
+  it("formats a build placement spend as a debit, sharing the study '−' glyph", () => {
+    expect(buildSpendText(20, "wood")).toBe("−20 wood");
+    expect(buildSpendText(15, "stone")).toBe("−15 stone");
+    expect(buildSpendText(20, "wood").startsWith("−")).toBe(true); // same minus as studyFloatText
   });
 
   it("makes a breach a small, subdued puff regardless of band size", () => {

@@ -137,6 +137,18 @@ export function studyFloatText(food: number, points: number): string {
 }
 
 /**
+ * The note that floats off a freshly-placed building: the resource cost just
+ * debited. Every other action confirms its resource change with a floatGain
+ * ("+N wood" on a gather, the reward on a quest, the {@link studyFloatText}
+ * spend at the totem) — placing a building only ticked the HUD number down.
+ * This closes that loop at the placement site, using the same "−" debit glyph
+ * as {@link studyFloatText} so a spend reads consistently across the game.
+ */
+export function buildSpendText(amount: number, res: string): string {
+  return `−${amount} ${res}`;
+}
+
+/**
  * Route a logged sim event to the burst it deserves, or null when it earns no
  * extra juice. Births and deaths are not log events — the scene derives those
  * from the `totals` counters — so they are not handled here.
