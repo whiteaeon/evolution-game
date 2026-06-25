@@ -53,7 +53,7 @@ export function diplomacyPanelHTML(
         : "";
       return `<div class="rival" data-rival="${r.id}">
         <div class="rival-h">
-          <span class="rival-disp" data-disp="${disp.key}" style="color:${disp.color}" title="${disp.label}">${disp.icon}</span>
+          <span class="rival-disp" data-disp="${disp.key}" style="color:${disp.color}" role="img" aria-label="${disp.label}" title="${disp.label}">${disp.icon}</span>
           <span class="rival-name">${r.name}</span>
           <span class="rival-where">${regionName(r.homeRegion)}</span>
         </div>

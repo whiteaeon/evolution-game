@@ -56,6 +56,12 @@ describe("diplomacyPanelHTML", () => {
     expect(html).toContain('data-disp="hostile"');
   });
 
+  it("exposes the disposition icon to screen readers as an aria-labelled image", () => {
+    const html = diplomacyPanelHTML([rival({ disposition: -0.8 })], regionName, null);
+    expect(html).toContain('role="img"');
+    expect(html).toContain('aria-label="Hostile"');
+  });
+
   it("shows no action buttons when there is no pending offer", () => {
     const html = diplomacyPanelHTML([rival()], regionName, null);
     expect(html).not.toContain("data-act=");
