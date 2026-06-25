@@ -13,6 +13,7 @@ import { HOMININ_WALK, homininFrameKey } from "./homininWalk.js";
 import { chooseNpcActivity, type NpcActivity } from "./npcActivity.js";
 import { pickGatherTarget } from "./gatherTarget.js";
 import { arrivalSpeed } from "./arrival.js";
+import { freshStall, stepStall, type StallTracker } from "./moveStall.js";
 import { stepGather } from "./gatherCadence.js";
 import { movePingStyle } from "./movePing.js";
 import { gatherPulseTint } from "./gatherPulse.js";
@@ -283,6 +284,7 @@ export class WorldScene extends Phaser.Scene {
   private moveTarget: { x: number; y: number } | null = null;
   private moveMark!: Phaser.GameObjects.Arc; // expanding ring pinged at a click-to-move destination
   private moveMarkAge = 0; // ms since the current ping fired; drives its expand-and-fade
+  private moveStall: StallTracker | null = null; // abandons a click the chieftain can't reach
   private keys!: Record<"up" | "down" | "left" | "right", Phaser.Input.Keyboard.Key[]>;
   private animTimer = 0;
   private animPhase = 0;
@@ -3208,8 +3210,15 @@ export class WorldScene extends Phaser.Scene {
       const tdx = this.moveTarget.x - this.player.x;
       const tdy = this.moveTarget.y - this.player.y;
       const dist = Math.hypot(tdx, tdy);
-      if (dist < 4) this.moveTarget = null;
-      else {
+      // Give up on a click the chieftain can't reach (one landed inside a tree or
+      // rock) instead of orbiting the blocker forever — the arrival check below
+      // would never fire.
+      const stall = stepStall(this.moveStall ?? freshStall(dist), dist, dt);
+      this.moveStall = stall.tracker;
+      if (dist < 4 || stall.giveUp) {
+        this.moveTarget = null;
+        this.moveStall = null;
+      } else {
         dx = tdx;
         dy = tdy;
         targetSpeed = arrivalSpeed(dist, PLAYER_SPEED, ARRIVE_RADIUS);
@@ -3294,6 +3303,7 @@ export class WorldScene extends Phaser.Scene {
   /** Fire the click-to-move ripple at a destination, restarting any live one. */
   private pingMove(wx: number, wy: number): void {
     this.moveMarkAge = 0;
+    this.moveStall = null; // new destination: seed a fresh stall track next frame
     this.moveMark.setPosition(wx, wy).setVisible(true);
   }
 
