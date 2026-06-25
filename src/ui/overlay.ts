@@ -6,9 +6,11 @@ import {
   TASKS,
   DIFFICULTIES,
   DIFFICULTY_PRESETS,
+  QUEST_DEFS,
   regionById,
   type Difficulty,
   type Era,
+  type QuestId,
   type Task,
   type TechId,
   type TraitName,
@@ -20,6 +22,7 @@ import { FamilyTree } from "./familytree.js";
 import { TechGraph } from "./techgraph.js";
 import { keyboardShortcut } from "./shortcuts.js";
 import { eraSpans, traitDeltas, summaryHTML, type EraEntry } from "./summary.js";
+import { questLogHTML } from "./quests.js";
 
 const TRAIT_LABEL: Record<TraitName, string> = {
   strength: "Strength",
@@ -66,6 +69,10 @@ export class UIOverlay {
   private map: MapView;
   private tree: FamilyTree;
   private techGraph: TechGraph;
+  private toastHost!: HTMLElement;
+  /** Quest ids already announced via toast, to fire the cue exactly once. */
+  private shownQuestDone = new Set<QuestId>();
+  private questsPrimed = false;
 
   constructor(root: HTMLElement, ctrl: GameController) {
     this.root = root;
@@ -79,6 +86,9 @@ export class UIOverlay {
     this.map = new MapView(mapHost, ctrl);
     this.tree = new FamilyTree(treeHost, ctrl);
     this.techGraph = new TechGraph(graphHost, ctrl);
+    this.toastHost = document.createElement("div");
+    this.toastHost.className = "toasts";
+    document.body.append(this.toastHost);
     this.bindKeyboard();
     if (!localStorage.getItem(TUTORIAL_KEY)) this.el.tutorial.classList.remove("hidden");
   }
@@ -185,6 +195,11 @@ export class UIOverlay {
         <div class="badges" data-el="badges"></div>
       </div>
 
+      <div class="panel">
+        <h2>Quests <span class="dim" data-el="quest-count"></span></h2>
+        <div class="quests" data-el="quests"></div>
+      </div>
+
       <div class="panel grow">
         <h2>Chronicle</h2>
         <div class="log" data-el="log"></div>
@@ -244,7 +259,8 @@ export class UIOverlay {
     const q = (sel: string) => this.root.querySelector(sel) as HTMLElement;
     for (const k of [
       "era", "year", "gen", "pop", "season", "goal", "goal-text", "eratrack", "resources", "legacy", "difficulty",
-      "traits", "graph", "labor", "tasks", "lang", "techtree", "badges", "ach-count", "log",
+      "traits", "graph", "labor", "tasks", "lang", "techtree", "badges", "ach-count",
+      "quests", "quest-count", "log",
       "encounter", "encounter-text", "choice", "choice-title", "choice-text",
       "endscreen", "end-title", "end-body", "end-summary", "end-card", "tutorial",
     ]) {
@@ -387,6 +403,7 @@ export class UIOverlay {
 
     this.renderTechTree(s);
     this.renderBadges();
+    this.renderQuests(s);
     this.sampleAndDrawGraph(avg.count, avg.traits.intelligence);
 
     this.el.log.innerHTML = s.log
@@ -479,6 +496,37 @@ export class UIOverlay {
     }).join("");
   }
 
+  /**
+   * Render the quest log from sim state and fire a subtle toast the first frame
+   * a quest shows as complete. Pure read of `s.quests`; the toast is primed on
+   * the first frame of a run so loading a finished save doesn't replay cues.
+   */
+  private renderQuests(s: GameController["sim"]["state"]): void {
+    const done = s.quests.filter((q) => q.done).length;
+    this.el["quest-count"].textContent = `(${done}/${s.quests.length})`;
+    this.el.quests.innerHTML = questLogHTML(s.quests, QUEST_DEFS);
+
+    for (const q of s.quests) {
+      if (!q.done || this.shownQuestDone.has(q.id)) continue;
+      this.shownQuestDone.add(q.id);
+      if (this.questsPrimed) {
+        const def = QUEST_DEFS.find((d) => d.id === q.id);
+        this.toast(`✓ Quest complete — ${def?.title ?? q.id}`);
+      }
+    }
+    this.questsPrimed = true;
+  }
+
+  /** Show a subtle, self-dismissing toast above the world. */
+  private toast(msg: string): void {
+    const el = document.createElement("div");
+    el.className = "toast";
+    el.textContent = msg;
+    this.toastHost.append(el);
+    this.audio.chime();
+    setTimeout(() => el.remove(), 4000);
+  }
+
   private sampleAndDrawGraph(pop: number, intel: number): void {
     if (this.ctrl.tickStamp !== this.lastSample) {
       this.lastSample = this.ctrl.tickStamp;
@@ -519,6 +567,8 @@ export class UIOverlay {
       this.eraLog = [];
       this.startTraits = null;
       this.peakPop = 0;
+      this.shownQuestDone.clear();
+      this.questsPrimed = false;
     }
     if (!this.startTraits) this.startTraits = { ...avg.traits };
     if (avg.count > this.peakPop) this.peakPop = avg.count;
