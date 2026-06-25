@@ -15,6 +15,7 @@ import {
   type QuestContext,
   type QuestProgress,
 } from "./quests.js";
+import { createRivals, evolveRival, type RivalTribe } from "./rivals.js";
 import {
   ERAS,
   LINEAGES,
@@ -212,6 +213,8 @@ export interface SimState {
   researchTarget: TechId | null;
   pendingEncounter: Encounter | null;
   pendingChoice: PendingChoice | null;
+  /** AI neighbour tribes sharing the region map (pure sim; no diplomacy yet). */
+  rivals: RivalTribe[];
   /** Lifetime tallies for the chronicle / stats / achievement screens. */
   totals: {
     births: number;
@@ -244,6 +247,12 @@ export interface TraitAverages {
 export class Simulation {
   readonly config: SimConfig;
   private rng: RNG;
+  /**
+   * Separate RNG stream for the AI neighbour tribes. Keeping rivals off the main
+   * stream means their evolution never perturbs the player's simulation, balance
+   * or replay — yet it is still saved/restored, so rivals resume deterministically.
+   */
+  private rivalRng: RNG;
   private nextId = 1;
   state: SimState;
   allocation: TaskAllocation;
@@ -251,6 +260,7 @@ export class Simulation {
   constructor(config: Partial<SimConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.rng = new RNG(this.config.seed);
+    this.rivalRng = new RNG((this.config.seed ^ 0x5f3759df) >>> 0);
     this.allocation = Object.fromEntries(TASKS.map((t) => [t, 0])) as TaskAllocation;
     this.state = this.createInitialState();
   }
@@ -281,6 +291,7 @@ export class Simulation {
       researchTarget: knowledge.available()[0] ?? null,
       pendingEncounter: null,
       pendingChoice: null,
+      rivals: createRivals(this.rivalRng, region.id),
       totals: {
         births: 0,
         deaths: 0,
@@ -464,6 +475,7 @@ export class Simulation {
     this.maybeEventChain();
     this.reproduce(effects);
     this.tryUpgradeShelter();
+    this.evolveRivals();
     this.updateEraAndGeneration();
     s.totals.peakPopulation = Math.max(s.totals.peakPopulation, this.living.length);
     this.evaluateQuests();
@@ -1018,6 +1030,15 @@ export class Simulation {
     }
   }
 
+  /**
+   * Evolve the AI neighbour tribes one tick on their own RNG stream. Pure sim:
+   * they grow/decline, drift in strength and mood, and slowly climb their own
+   * tech ladder, independent of (and invisible to) the player's mechanics.
+   */
+  private evolveRivals(): void {
+    for (const r of this.state.rivals) evolveRival(r, this.rivalRng);
+  }
+
   private updateEraAndGeneration(): void {
     const s = this.state;
     const era = s.knowledge.currentEra();
@@ -1101,6 +1122,7 @@ export class Simulation {
       v: 1,
       config: this.config,
       rng: this.rng.getState(),
+      rivalRng: this.rivalRng.getState(),
       nextId: this.nextId,
       allocation: this.allocation,
       state: { ...this.state, knowledge: this.state.knowledge.serialize() },
@@ -1112,9 +1134,11 @@ export class Simulation {
     const data = JSON.parse(json);
     const sim = new Simulation(data.config);
     sim.rng.setState(data.rng);
+    if (typeof data.rivalRng === "number") sim.rivalRng.setState(data.rivalRng);
     sim.nextId = data.nextId;
     sim.allocation = data.allocation;
     sim.state = { ...data.state, knowledge: Knowledge.deserialize(data.state.knowledge) };
+    if (!sim.state.rivals) sim.state.rivals = [];
     return sim;
   }
 }
