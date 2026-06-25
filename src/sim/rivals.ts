@@ -64,6 +64,66 @@ export const RIVAL_BALANCE = {
   dispositionNoise: 0.03,
 } as const;
 
+/** Tunables for raids/skirmishes, grouped so the balance is in one place. */
+export const RAID_BALANCE = {
+  /** Relations at or below this make a rival hostile enough to raid. */
+  hostileRelations: -0.5,
+  /** Ticks between possible raids (timing drawn on the rival RNG stream). */
+  raidInterval: 53,
+  /** Max fraction of either side that can fall in a single skirmish. */
+  maxLossFrac: 0.3,
+  /** Player defensive rating gained per shelter tier (cave→city). */
+  defensePerShelterTier: 0.25,
+  /** Defensive rating a rival gains per era of their own tech. */
+  defensePerEra: 0.2,
+} as const;
+
+/** One side of a skirmish: its martial might, numbers and defensive rating. */
+export interface SkirmishSide {
+  /** Martial might in [0, 1]. */
+  strength: number;
+  /** Headcount. */
+  population: number;
+  /** Defensive rating (>= 1); higher = better defended (shelter tier + tech). */
+  defense: number;
+}
+
+export interface SkirmishResult {
+  attackerPower: number;
+  defenderPower: number;
+  /** Fraction of the attacker lost, in [0, {@link RAID_BALANCE.maxLossFrac}]. */
+  attackerLossFrac: number;
+  /** Fraction of the defender lost, same bound. */
+  defenderLossFrac: number;
+}
+
+/** Combat power: martial might and numbers, shielded by defensive rating. */
+function combatPower(s: SkirmishSide): number {
+  return (0.5 + s.strength) * Math.sqrt(Math.max(0, s.population)) * Math.max(0, s.defense);
+}
+
+/**
+ * Deterministically resolve a skirmish between an attacker and a defender. Each
+ * side's power rises with strength, numbers and defensive rating; the weaker side
+ * suffers the larger share of casualties, but both sides always take some losses,
+ * bounded by {@link RAID_BALANCE.maxLossFrac}. A pure function of its inputs — no
+ * RNG — so outcomes are fully reproducible.
+ */
+export function resolveSkirmish(attacker: SkirmishSide, defender: SkirmishSide): SkirmishResult {
+  const a = combatPower(attacker);
+  const d = combatPower(defender);
+  const total = a + d || 1; // avoid 0/0 if both sides are empty
+  const m = RAID_BALANCE.maxLossFrac;
+  return {
+    attackerPower: a,
+    defenderPower: d,
+    // Each side's loss share scales with the *opponent's* power, so the stronger,
+    // better-defended, more numerous side fares better.
+    attackerLossFrac: m * (d / total),
+    defenderLossFrac: m * (a / total),
+  };
+}
+
 const RIVAL_NAMES = [
   "the Ashfolk",
   "the Rivermen",

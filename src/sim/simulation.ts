@@ -15,7 +15,16 @@ import {
   type QuestContext,
   type QuestProgress,
 } from "./quests.js";
-import { createRivals, evolveRival, shiftRelations, type RivalTribe } from "./rivals.js";
+import {
+  createRivals,
+  evolveRival,
+  shiftRelations,
+  resolveSkirmish,
+  RAID_BALANCE,
+  RIVAL_BALANCE,
+  type RivalTribe,
+  type SkirmishSide,
+} from "./rivals.js";
 import {
   ERAS,
   LINEAGES,
@@ -515,6 +524,7 @@ export class Simulation {
     const popBeforeDeaths = this.living.length;
     this.ageAndDie(effects);
     this.maybeEvent(effects);
+    this.maybeRaid(effects);
     // A notable loss: several of the tribe fell in a single year — they grieve.
     if (popBeforeDeaths - this.living.length >= 2) this.emitDialogue("death");
     this.maybeEncounter();
@@ -739,6 +749,62 @@ export class Simulation {
       }
     }
     return deaths;
+  }
+
+  /** The tribe's defensive rating for a skirmish: shelter tier + defensive tech. */
+  private defenseRating(e: Required<TechEffects>): number {
+    const shelterTier = SHELTERS.indexOf(this.state.shelter); // 0 (cave) … 4 (city)
+    // defenseMult is a lethality multiplier (<1 = better defended); invert to a
+    // non-negative bonus so hunting/bronze/iron/gunpowder raise the rating.
+    const techDefense = Math.max(0, 1 - e.defenseMult);
+    return 1 + shelterTier * RAID_BALANCE.defensePerShelterTier + techDefense;
+  }
+
+  /**
+   * A hostile rival raids the tribe. Fires only when a neighbour's relations have
+   * soured past {@link RAID_BALANCE.hostileRelations}; the timing is drawn on the
+   * rival RNG stream, so *whether* a raid happens never perturbs the player's own
+   * stream or replay. The skirmish is resolved deterministically by
+   * {@link resolveSkirmish}: both sides take losses scaled by strength, numbers,
+   * defensive tech and (for the tribe) shelter tier. Player casualties go through
+   * the existing mortality model ({@link applyHazard}); the raiders lose a matching
+   * share of their headcount, floored so a tribe is never wiped out.
+   */
+  private maybeRaid(e: Required<TechEffects>): void {
+    const s = this.state;
+    if (s.rivals.length === 0 || this.living.length < 2) return;
+    if (s.tick % RAID_BALANCE.raidInterval !== 0) return;
+    const hostiles = s.rivals.filter((r) => r.relations <= RAID_BALANCE.hostileRelations);
+    if (hostiles.length === 0) return;
+    if (!this.rivalRng.chance(0.5)) return;
+    const raider = this.rivalRng.pick(hostiles);
+
+    const defender: SkirmishSide = {
+      strength: this.traitAverages().traits.strength,
+      population: this.living.length,
+      defense: this.defenseRating(e),
+    };
+    const attacker: SkirmishSide = {
+      strength: raider.strength,
+      population: raider.population,
+      defense: 1 + raider.eraIndex * RAID_BALANCE.defensePerEra,
+    };
+    const outcome = resolveSkirmish(attacker, defender);
+
+    // Player losses through the existing per-individual mortality model.
+    const lost = this.applyHazard("strength", outcome.defenderLossFrac);
+    // Raiders lose a matching share of their headcount (floored so they persist).
+    raider.population = Math.max(
+      RIVAL_BALANCE.popFloor,
+      raider.population * (1 - outcome.attackerLossFrac),
+    );
+
+    this.logEvent(
+      "raid",
+      lost
+        ? `${raider.name} raid the settlement — ${lost} fell defending it.`
+        : `${raider.name} raid the settlement, but are driven off.`,
+    );
   }
 
   /**
