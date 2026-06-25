@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { SKIN, HAIR } from "./palette.js";
 import type { Lineage } from "../sim/index.js";
 import { CC0_ART, CC0_GROUPS } from "./art-cc0-data.js";
+import { HOMININ_POSES, homininFrameKey } from "./homininWalk.js";
 
 /**
  * Biomes, decor, structures, animals, food and the hearth are sourced from
@@ -119,15 +120,18 @@ const HOM_H = 26;
 
 export function ensureHomininTexture(scene: Phaser.Scene, p: MorphParams): string {
   const key = morphKey(p);
-  // Two frames per morph (a gentle 2-step walk cycle). Both derive from the same
-  // morph signature, so dedup-by-key is preserved; `${key}_1` is just frame B.
-  bake(scene, key, HOM_W, HOM_H, (g) => drawHominin(g, p, 0));
-  bake(scene, `${key}_1`, HOM_W, HOM_H, (g) => drawHominin(g, p, 1));
+  // Three poses per morph (a 4-beat walk cycle: passing + two foot contacts).
+  // All derive from the same morph signature, so dedup-by-key is preserved —
+  // textures stay bounded by the morph, not by frames of playback. Pose 0 reuses
+  // the base key; poses 1–2 are `${key}_1` and `${key}_2`.
+  for (let pose = 0; pose < HOMININ_POSES; pose++) {
+    bake(scene, homininFrameKey(key, pose), HOM_W, HOM_H, (g) => drawHominin(g, p, pose));
+  }
   return key;
 }
 
-/** Draw one walk frame (0 = stride A, 1 = stride B) of the era/genome morph. */
-function drawHominin(g: G, p: MorphParams, frame: 0 | 1): void {
+/** Draw one walk pose (0 = passing, 1 = left-foot contact, 2 = right-foot contact). */
+function drawHominin(g: G, p: MorphParams, frame: number): void {
   let skin: number = SKIN[p.skin % SKIN.length];
   if (p.lineage === "neanderthal") skin = lighten(skin, 8);
   if (p.lineage === "denisovan") skin = darken(skin, 8);
@@ -152,20 +156,24 @@ function drawHominin(g: G, p: MorphParams, frame: 0 | 1): void {
   const legY = torsoY + torsoH;
   const legLen = 6;
 
-  // Walk cycle: legs swing apart on frame B, arms swing opposite to the legs.
-  const step = frame; // 0 | 1
-  const lLegX = torsoX + 1 - step; // trailing leg sweeps back
-  const rLegX = torsoX + torsoW - 3 + step; // leading leg sweeps forward
+  // Walk cycle (3 poses, played as a 4-beat loop — see homininWalk.ts):
+  //   0 = passing (both feet planted), 1 = left-foot contact, 2 = right-foot
+  // contact. The stepping foot lifts a pixel; the arms swing in anti-phase.
+  const lLift = frame === 1 ? 1 : 0; // raise the stepping foot off the ground
+  const rLift = frame === 2 ? 1 : 0;
+  const armSwing = frame === 1 ? 1 : frame === 2 ? -1 : 0;
+  const lLegX = torsoX + 1;
+  const rLegX = torsoX + torsoW - 3;
 
   // ── legs (shaded for a rounder, cleaner silhouette) ──
   const legCol = style.trousers ? gDark : skinShade;
   const legLit = style.trousers ? garment : skin;
-  px(g, legCol, lLegX, legY, 2, legLen);
-  px(g, legLit, lLegX, legY, 1, legLen - 1); // lit front edge
-  px(g, legCol, rLegX, legY, 2, legLen);
-  px(g, legLit, rLegX, legY, 1, legLen - 1);
-  px(g, 0x2c2018, lLegX - 1, legY + legLen - 1, 3, 1); // feet/shoes
-  px(g, 0x2c2018, rLegX, legY + legLen - 1, 3, 1);
+  px(g, legCol, lLegX, legY, 2, legLen - lLift);
+  px(g, legLit, lLegX, legY, 1, legLen - 1 - lLift); // lit front edge
+  px(g, legCol, rLegX, legY, 2, legLen - rLift);
+  px(g, legLit, rLegX, legY, 1, legLen - 1 - rLift);
+  px(g, 0x2c2018, lLegX - 1, legY + legLen - 1 - lLift, 3, 1); // feet/shoes (lift the stepping foot)
+  px(g, 0x2c2018, rLegX, legY + legLen - 1 - rLift, 3, 1);
 
   // ── torso skin base, then clothing ──
   px(g, skin, torsoX, torsoY, torsoW, torsoH);
@@ -189,8 +197,8 @@ function drawHominin(g: G, p: MorphParams, frame: 0 | 1): void {
 
   // ── arms (swing opposite the legs) ──
   const sleeve = style.cut === "hide" ? skin : garment;
-  const lArmY = torsoY + 1 + step;
-  const rArmY = torsoY + 1 - step;
+  const lArmY = torsoY + 1 + armSwing;
+  const rArmY = torsoY + 1 - armSwing;
   px(g, sleeve, torsoX - 1, lArmY, 1, torsoH - 2);
   px(g, sleeve, torsoX + torsoW, rArmY, 1, torsoH - 2);
   px(g, skinShade, torsoX - 1, lArmY + torsoH - 2, 1, 1); // hands
@@ -222,17 +230,21 @@ function drawHominin(g: G, p: MorphParams, frame: 0 | 1): void {
     if (p.eraIdx >= 4 && p.eraIdx <= 5) px(g, hair, headX, headY, headW, 1); // tidier
   }
 
-  // ── held tool, advancing with the era (leading hand follows the arm swing) ──
-  const handY = torsoY + torsoH - 1;
+  // ── held tool, advancing with the era. The carrying (left) hand bobs with the
+  // stride, so the era-specific tool gets a small era-appropriate motion. ──
+  const toolDY = armSwing; // tracks the left arm's swing
+  const handY = torsoY + torsoH - 1 + toolDY;
+  const tHeadY = headY + toolDY;
+  const tTorsoY = torsoY + toolDY;
   const tx = torsoX - 2;
   switch (style.tool) {
-    case "spear": px(g, 0x6e472d, tx, headY, 1, handY - headY + 2); px(g, 0xcfd3d6, tx, headY, 1, 2); break;
-    case "stick": px(g, 0x7d6a48, tx, torsoY, 1, handY - torsoY + 2); break;
-    case "sickle": px(g, 0x7d6a48, tx, torsoY + 2, 1, 5); px(g, 0xcfd3d6, tx - 1, torsoY + 1, 2, 1); break;
-    case "sword": px(g, 0xcfd3d6, tx, torsoY + 1, 1, 6); px(g, 0xb08a4a, tx - 1, torsoY + 6, 3, 1); break;
+    case "spear": px(g, 0x6e472d, tx, tHeadY, 1, handY - tHeadY + 2); px(g, 0xcfd3d6, tx, tHeadY, 1, 2); break;
+    case "stick": px(g, 0x7d6a48, tx, tTorsoY, 1, handY - tTorsoY + 2); break;
+    case "sickle": px(g, 0x7d6a48, tx, tTorsoY + 2, 1, 5); px(g, 0xcfd3d6, tx - 1, tTorsoY + 1, 2, 1); break;
+    case "sword": px(g, 0xcfd3d6, tx, tTorsoY + 1, 1, 6); px(g, 0xb08a4a, tx - 1, tTorsoY + 6, 3, 1); break;
     case "scroll": px(g, 0xe8e0cf, tx, handY - 2, 2, 3); px(g, 0xc9bfa3, tx, handY - 2, 2, 1); break;
-    case "hammer": px(g, 0x6e472d, tx, torsoY + 2, 1, 5); px(g, 0x9a958f, tx - 1, torsoY + 1, 3, 2); break;
-    case "wrench": px(g, 0xbfc6cc, tx, torsoY + 2, 1, 5); px(g, 0xe6ebef, tx, torsoY + 2, 1, 1); break;
+    case "hammer": px(g, 0x6e472d, tx, tTorsoY + 2, 1, 5); px(g, 0x9a958f, tx - 1, tTorsoY + 1, 3, 2); break;
+    case "wrench": px(g, 0xbfc6cc, tx, tTorsoY + 2, 1, 5); px(g, 0xe6ebef, tx, tTorsoY + 2, 1, 1); break;
     case "case": px(g, 0x3a2a1c, tx - 1, handY - 1, 3, 3); px(g, 0x6f6256, tx - 1, handY - 1, 3, 1); break;
     case "device": px(g, 0x202830, tx, handY - 2, 2, 3); px(g, 0x67d6ff, tx, handY - 2, 2, 1); break;
     default: break;
