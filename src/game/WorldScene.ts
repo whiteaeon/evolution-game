@@ -15,6 +15,7 @@ import { pickGatherTarget } from "./gatherTarget.js";
 import { arrivalSpeed } from "./arrival.js";
 import { freshStall, stepStall, type StallTracker } from "./moveStall.js";
 import { stepGather } from "./gatherCadence.js";
+import { gatherApproach } from "./gatherApproach.js";
 import { movePingStyle } from "./movePing.js";
 import { gatherPulseTint } from "./gatherPulse.js";
 import { gatherFacing } from "./gatherFacing.js";
@@ -141,6 +142,9 @@ const GATHER_COOLDOWN_MS = 220;
 /** Reach within which a node is gatherable, and its targeting stickiness margin. */
 const GATHER_RANGE = 34;
 const GATHER_STICK = 12; // a held node only yields to one closer by more than this
+// Where click-to-walk stops when you click a node: just inside gather reach, so
+// the chieftain arrives with the node already aimed instead of bumping it.
+const GATHER_APPROACH_STOP = GATHER_RANGE - 6;
 // Deadzone (px) around dead-centre within which a node-being-harvested doesn't
 // turn the standing chieftain, so a nearly-aligned node can't flicker the facing.
 const GATHER_FACE_DEADZONE = 6;
@@ -633,6 +637,20 @@ export class WorldScene extends Phaser.Scene {
           const id = hit.getData("npcId") as number;
           const npc = this.npcs.find((n) => n.ind.id === id);
           if (npc) this.openDialog(npc.ind);
+          return;
+        }
+        // Clicking a gatherable node walks the chieftain up to gather reach of it
+        // (a node is a solid, so the bare click point would just stall on the
+        // blocker). Aim for a point a hair inside reach so it arrives aimed.
+        const clickedNode = this.nodeAtPoint(pointer.worldX, pointer.worldY);
+        if (clickedNode) {
+          const approach = gatherApproach(
+            { x: this.player.x, y: this.player.y },
+            { x: clickedNode.sprite.x, y: clickedNode.sprite.y },
+            GATHER_APPROACH_STOP,
+          );
+          if (approach) this.moveTarget = approach; // null ⇒ already in reach, just ping
+          this.pingMove(clickedNode.sprite.x, clickedNode.sprite.y);
           return;
         }
         this.moveTarget = { x: pointer.worldX, y: pointer.worldY };
@@ -1890,6 +1908,25 @@ export class WorldScene extends Phaser.Scene {
     for (const g of this.gatherables) {
       const d = Phaser.Math.Distance.Between(x, y, g.sprite.x, g.sprite.y);
       if (d < bestD) {
+        bestD = d;
+        best = g;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * The gatherable a click landed on, if any — the nearest node whose sprite
+   * covers the point (its display half-width, with a little slack for an easy
+   * click). Lets a click on a tree/rock/bush order a walk over to gather it.
+   */
+  private nodeAtPoint(x: number, y: number): Gatherable | null {
+    let best: Gatherable | null = null;
+    let bestD = Infinity;
+    for (const g of this.gatherables) {
+      const reach = g.sprite.displayWidth * 0.5 + 6;
+      const d = Phaser.Math.Distance.Between(x, y, g.sprite.x, g.sprite.y);
+      if (d <= reach && d < bestD) {
         bestD = d;
         best = g;
       }
