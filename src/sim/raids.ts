@@ -27,7 +27,7 @@ export function maybeRaid(eng: SimEngine, e: Required<TechEffects>): void {
   if (s.tick % RAID_BALANCE.raidInterval !== 0) return;
   const hostiles = s.rivals.filter((r) => r.relations <= RAID_BALANCE.hostileRelations);
   if (hostiles.length === 0) return;
-  if (!eng.rivalRng.chance(0.5)) return;
+  if (!eng.rivalRng.chance(RAID_BALANCE.raidChance)) return;
   const raider = eng.rivalRng.pick(hostiles);
 
   const defender: SkirmishSide = {
