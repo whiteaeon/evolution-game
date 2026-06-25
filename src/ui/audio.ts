@@ -421,6 +421,17 @@ export class WorldAudio {
     [523, 659, 784].forEach((f, i) => this.tone({ freq: f, dur: 0.3, gain: 0.05, type: "triangle", delay: i * 0.1 }));
   }
 
+  /**
+   * A short rising horn-call as a villager is mustered to the hearth's defence.
+   * Distinct from {@link build}'s downward placement thunk (which the rally used
+   * to borrow) and from {@link raidWarn}'s low ominous warning: this is a bright,
+   * upward "to arms!" so each rally press reads as a call answered, not a thud.
+   */
+  rally(): void {
+    this.tone({ freq: 247, to: 330, dur: 0.14, gain: 0.05, type: "sawtooth" });
+    this.tone({ freq: 330, to: 392, dur: 0.2, gain: 0.05, type: "sawtooth", delay: 0.09 });
+  }
+
   /** A low, ominous double horn warning that raiders have been sighted. */
   raidWarn(): void {
     this.tone({ freq: 140, to: 96, dur: 0.6, gain: 0.07, type: "sawtooth" });

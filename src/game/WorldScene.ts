@@ -3076,7 +3076,7 @@ export class WorldScene extends Phaser.Scene {
     // A warm muster pop at the villager, swelling as the band grows — a rally
     // builds visible momentum at the hearth, like every other interactive action.
     this.popParticles(next.sprite.x, next.sprite.y - 12, 0xffd27a, rallyBurstCount(this.rallied.size));
-    this.audio.build(true);
+    this.audio.rally(); // a rising muster horn — a call answered, not a build thunk
   }
 
   /**
