@@ -6,6 +6,8 @@ import {
   gatherBurstCount,
   GATHER_BURST_BASE,
   questCelebrationCount,
+  questRingScale,
+  QUEST_RING_SCALE_BASE,
   raidCelebrationCount,
   rallyBurstCount,
   type FeedbackKind,
@@ -44,6 +46,13 @@ describe("event feedback routing", () => {
     expect(questCelebrationCount(12)).toBe(base + 3); // floor(12/4) bonus
     expect(questCelebrationCount(15)).toBeGreaterThan(questCelebrationCount(8)); // fatter payout pops fatter
     expect(questCelebrationCount(1000)).toBeLessThanOrEqual(14); // never floods the scene
+  });
+
+  it("blooms the quest turn-in ring wider with the reward, but keeps it capped", () => {
+    expect(questRingScale(0)).toBe(QUEST_RING_SCALE_BASE); // no reward bonus → baseline bloom
+    expect(questRingScale(12)).toBe(QUEST_RING_SCALE_BASE + 2); // floor(12/6) bonus
+    expect(questRingScale(18)).toBeGreaterThan(questRingScale(6)); // a fatter payout blooms wider
+    expect(questRingScale(1000)).toBeLessThanOrEqual(9); // never fills the screen
   });
 
   it("swells the raid-defence burst with the rallied band, but keeps it capped", () => {

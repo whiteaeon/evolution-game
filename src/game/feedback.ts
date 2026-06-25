@@ -52,6 +52,20 @@ export function questCelebrationCount(rewardAmount: number): number {
   return Math.min(14, BURST_STYLE.quest.count + bonus);
 }
 
+/** Baseline max-scale the quest turn-in's celebratory ring blooms to. */
+export const QUEST_RING_SCALE_BASE = 5;
+
+/**
+ * How far the quest turn-in's celebratory ring expands. Completing a quest is the
+ * game's climactic payoff, so — like the belief-milestone ring — a bright ring
+ * blooms at the giver, swelling a little with the size of the payout so a fat
+ * reward blooms wider. Clamped so even a huge bounty never fills the screen.
+ */
+export function questRingScale(rewardAmount: number): number {
+  const bonus = Math.max(0, Math.floor(rewardAmount / 6));
+  return Math.min(9, QUEST_RING_SCALE_BASE + bonus);
+}
+
 /**
  * How many particles a *quest accept* earns: a subdued sibling of the turn-in
  * burst. Accepting a task is a promise, not a payoff, so it pops smaller and is
