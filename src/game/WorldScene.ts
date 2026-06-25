@@ -43,7 +43,7 @@ import {
   type RivalTribe,
   type TechId,
 } from "../sim/index.js";
-import { dispositionStyle } from "../ui/diplomacy.js";
+import { dispositionStyle, neighbourRosterLine } from "../ui/diplomacy.js";
 import { policyOptions } from "./policyMenu.js";
 import { CONTROLS, QUEST_MARKER, BUILD_MARKER } from "./a11y.js";
 import { WorldAudio } from "../ui/audio.js";
@@ -85,6 +85,10 @@ const TECH_H = 236;
 // Council (policies) panel geometry, shared by its frame and the stance rows.
 const POLICY_W = 452;
 const POLICY_H = 248;
+
+// Neighbours (rivals roster) panel geometry.
+const NEIGHBOURS_W = 452;
+const NEIGHBOURS_H = 196;
 
 /** One full dawn→day→dusk→night→dawn loop, in render time (sim stays paused). */
 const DAY_LENGTH_MS = 90_000;
@@ -382,6 +386,14 @@ export class WorldScene extends Phaser.Scene {
   private giftCooldown = 0;
   private giftPrompt!: Phaser.GameObjects.Text;
 
+  // Neighbours roster (N): a read-only panel onto the sim's full rivals[] list —
+  // not just the one tribe that gets a world camp. Each tribe's home, era,
+  // numbers, might, disposition and player-built relations are shown, and it
+  // tracks the rivals as the sim drifts them each tick.
+  private neighboursPanel!: Phaser.GameObjects.Container;
+  private neighboursBody!: Phaser.GameObjects.Text;
+  private neighboursOpen = false;
+
   // Interactive camp defence: a hostile party marches on the camp; the chieftain
   // rallies villagers during a short window, then the raid resolves on the sim's
   // own skirmish math (see ./raidDefense).
@@ -436,6 +448,7 @@ export class WorldScene extends Phaser.Scene {
     this.buildQuestLog();
     this.buildTechPanel();
     this.buildPolicyPanel();
+    this.buildNeighboursPanel();
     this.buildInspectCard();
     this.buildHelpOverlay();
     this.buildSaveBar();
@@ -524,6 +537,10 @@ export class WorldScene extends Phaser.Scene {
           else this.closePolicyPanel(); // a click off the rows leaves the panel
           return;
         }
+        if (this.neighboursOpen) {
+          this.closeNeighboursPanel(); // read-only roster — any click dismisses it
+          return;
+        }
         if (currentlyOver.some((o) => o.getData("totem"))) {
           this.openTechPanel();
           return;
@@ -560,12 +577,14 @@ export class WorldScene extends Phaser.Scene {
       else if (this.dialogOpen) this.closeDialog();
       else if (this.techPanelOpen) this.closeTechPanel();
       else if (this.policyPanelOpen) this.closePolicyPanel();
+      else if (this.neighboursOpen) this.closeNeighboursPanel();
       else if (this.inspectOpen) this.closeInspect();
       else this.cancelBuild();
     });
     this.input.keyboard!.on("keydown-L", () => this.toggleQuestLog());
     this.input.keyboard!.on("keydown-T", () => this.toggleTechPanel());
     this.input.keyboard!.on("keydown-P", () => this.togglePolicyPanel());
+    this.input.keyboard!.on("keydown-N", () => this.toggleNeighboursPanel());
     this.input.keyboard!.on("keydown-M", () => this.toggleMute());
     this.input.keyboard!.on("keydown-H", () => this.toggleHelp());
     this.input.keyboard!.on("keydown-E", () => this.interact()); // talk to a nearby villager
@@ -1987,6 +2006,7 @@ export class WorldScene extends Phaser.Scene {
   private openTechPanel(): void {
     if (this.dialogOpen) this.closeDialog();
     if (this.policyPanelOpen) this.closePolicyPanel();
+    if (this.neighboursOpen) this.closeNeighboursPanel();
     this.cancelBuild();
     this.techPanelOpen = true;
     this.techPanel.setVisible(true);
@@ -2130,6 +2150,7 @@ export class WorldScene extends Phaser.Scene {
   private openPolicyPanel(): void {
     if (this.dialogOpen) this.closeDialog();
     if (this.techPanelOpen) this.closeTechPanel();
+    if (this.neighboursOpen) this.closeNeighboursPanel();
     this.cancelBuild();
     this.policyPanelOpen = true;
     this.policyPanel.setVisible(true);
@@ -2201,6 +2222,78 @@ export class WorldScene extends Phaser.Scene {
     this.ctrl.sim.setPolicy(axisId, stanceId);
     this.audio.build(true);
     this.refreshPolicyPanel();
+  }
+
+  // ── neighbours (full rivals roster) ──────────────────────────────────────────
+
+  /** Static frame for the read-only Neighbours roster; the body text is refreshed
+   *  from the live sim while the panel is open. */
+  private buildNeighboursPanel(): void {
+    const w = NEIGHBOURS_W;
+    const h = NEIGHBOURS_H;
+    const panel = this.add.rectangle(0, 0, w, h, 0x12180f, 0.95).setStrokeStyle(2, 0x9fb86a);
+    const title = this.add
+      .text(-w / 2 + 14, -h / 2 + 9, "Neighbours — tribes that share your world (N)", {
+        fontFamily: "monospace",
+        fontSize: "14px",
+        color: "#bfe08a",
+        fontStyle: "bold",
+      })
+      .setOrigin(0, 0);
+    this.neighboursBody = this.add
+      .text(-w / 2 + 14, -h / 2 + 32, "", {
+        fontFamily: "monospace",
+        fontSize: "11px",
+        color: "#e9e0c8",
+        wordWrap: { width: w - 28 },
+        lineSpacing: 4,
+      })
+      .setOrigin(0, 0);
+    const hint = this.add
+      .text(w / 2 - 12, h / 2 - 10, "N or Esc to close", {
+        fontFamily: "monospace",
+        fontSize: "10px",
+        color: "#8a9a6a",
+      })
+      .setOrigin(1, 1);
+    this.neighboursPanel = this.add
+      .container(VIEW_W / 2, VIEW_H / 2 - 4, [panel, title, this.neighboursBody, hint])
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH + 1)
+      .setVisible(false);
+  }
+
+  private toggleNeighboursPanel(): void {
+    if (this.neighboursOpen) this.closeNeighboursPanel();
+    else this.openNeighboursPanel();
+  }
+
+  private openNeighboursPanel(): void {
+    if (this.dialogOpen) this.closeDialog();
+    if (this.techPanelOpen) this.closeTechPanel();
+    if (this.policyPanelOpen) this.closePolicyPanel();
+    this.cancelBuild();
+    this.neighboursOpen = true;
+    this.neighboursPanel.setVisible(true);
+    this.refreshNeighboursPanel();
+  }
+
+  private closeNeighboursPanel(): void {
+    this.neighboursOpen = false;
+    this.neighboursPanel.setVisible(false);
+  }
+
+  /** Redraw the roster from the sim's live rivals[]: one entry per tribe, with the
+   *  same disposition styling the world camp uses. Read-only — diplomacy actions
+   *  stay at the neighbour camp (gifts) and in the dialogue choices. */
+  private refreshNeighboursPanel(): void {
+    const rivals = this.ctrl.sim.state.rivals;
+    if (rivals.length === 0) {
+      this.neighboursBody.setText("No neighbours share your world.");
+      return;
+    }
+    const lines = rivals.map((r) => neighbourRosterLine(r, () => rivalRegion(r).name));
+    this.neighboursBody.setText(lines.join("\n"));
   }
 
   /** Spend food to pour insight into the current target; reflect any discovery. */
@@ -3004,6 +3097,10 @@ export class WorldScene extends Phaser.Scene {
     } else {
       this.leaderHud.setVisible(false);
     }
+
+    // Keep the Neighbours roster live: the sim drifts rivals (numbers, might,
+    // mood) every tick, so reflect that while the panel is open.
+    if (this.neighboursOpen) this.refreshNeighboursPanel();
   }
 
   // ── leaders & notables ───────────────────────────────────────────────────

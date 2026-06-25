@@ -1,4 +1,4 @@
-import type { PendingChoice, RivalTribe } from "../sim/index.js";
+import { ERAS, type PendingChoice, type RivalTribe } from "../sim/index.js";
 
 /** How a rival's disposition toward the player is shown: colour + icon + label. */
 export interface DispositionStyle {
@@ -22,6 +22,26 @@ export function dispositionStyle(disposition: number): DispositionStyle {
   if (disposition <= 0.15) return NEUTRAL;
   if (disposition < 0.5) return CORDIAL;
   return FRIENDLY;
+}
+
+/**
+ * Format one rival tribe as a two-line entry for the in-world Neighbours roster:
+ * its disposition glyph, name, home region and biome, then its era, numbers,
+ * martial might, mood and the relations the player has built. Pure string
+ * assembly — no DOM, no sim reads beyond its arguments — so the WorldScene panel
+ * and these unit tests share exactly one source of truth.
+ */
+export function neighbourRosterLine(
+  r: RivalTribe,
+  regionName: (id: string) => string,
+): string {
+  const disp = dispositionStyle(r.disposition);
+  const era = ERAS[r.eraIndex];
+  return (
+    `${disp.icon} ${r.name} · ${regionName(r.homeRegion)} (${r.biome})\n` +
+    `   ${era} · 👥 ${Math.round(r.population)} · might ${Math.round(r.strength * 100)}%` +
+    ` · ${disp.label} · relations ${r.relations.toFixed(2)}`
+  );
 }
 
 /**

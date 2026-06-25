@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { PendingChoice, RivalTribe } from "../sim/index.js";
-import { dispositionStyle, diplomacyPanelHTML } from "./diplomacy.js";
+import { ERAS, type PendingChoice, type RivalTribe } from "../sim/index.js";
+import { dispositionStyle, diplomacyPanelHTML, neighbourRosterLine } from "./diplomacy.js";
 
 function rival(over: Partial<RivalTribe> = {}): RivalTribe {
   return {
@@ -106,5 +106,35 @@ describe("diplomacyPanelHTML", () => {
     };
     const html = diplomacyPanelHTML([rival()], regionName, pending);
     expect(html).not.toContain("data-act=");
+  });
+});
+
+describe("neighbourRosterLine", () => {
+  it("names the tribe, its mapped region and biome, and resolves the region via the lookup", () => {
+    const line = neighbourRosterLine(rival(), regionName);
+    expect(line).toContain("the Ashfolk");
+    expect(line).toContain("Deepwood"); // mapped, not the raw "deepwood" id
+    expect(line).toContain("(forest)");
+  });
+
+  it("shows the tribe's era, rounded headcount and percent might", () => {
+    const line = neighbourRosterLine(
+      rival({ eraIndex: 2, population: 17.6, strength: 0.42 }),
+      regionName,
+    );
+    expect(line).toContain(ERAS[2]);
+    expect(line).toContain("👥 18"); // 17.6 rounded
+    expect(line).toContain("might 42%"); // 0.42 → 42%
+  });
+
+  it("tags the entry by disposition and shows relations to two decimals", () => {
+    const hostile = neighbourRosterLine(rival({ disposition: -0.8, relations: -0.4 }), regionName);
+    expect(hostile).toContain(dispositionStyle(-0.8).icon);
+    expect(hostile).toContain("Hostile");
+    expect(hostile).toContain("relations -0.40");
+
+    const friendly = neighbourRosterLine(rival({ disposition: 0.9, relations: 1 }), regionName);
+    expect(friendly).toContain("Friendly");
+    expect(friendly).toContain("relations 1.00");
   });
 });
