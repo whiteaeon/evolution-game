@@ -11,6 +11,7 @@ import {
 import { HOMININ_WALK, homininFrameKey } from "./homininWalk.js";
 import { chooseNpcActivity, type NpcActivity } from "./npcActivity.js";
 import { questMetric, type QuestMetrics, type QuestSpec } from "./quests.js";
+import { buildDialogue, type DialogNode } from "./dialogue.js";
 import {
   TUTORIAL_STEPS,
   advanceTutorial,
@@ -48,6 +49,12 @@ const CAMERA_LEAD = 64;
 const CAMERA_LEAD_LERP = 4;
 const FOG_CELL = 64;
 const FOG_DEPTH = 5000;
+
+// Conversation panel geometry, shared by buildDialog and the choice layout.
+const DIALOG_W = 480;
+const DIALOG_H = 150;
+const DIALOG_X = VIEW_W / 2;
+const DIALOG_Y = VIEW_H - 90;
 const UI_DEPTH = 100000;
 
 /** One full dawn→day→dusk→night→dawn loop, in render time (sim stays paused). */
@@ -162,6 +169,8 @@ export class WorldScene extends Phaser.Scene {
   private dialogName!: Phaser.GameObjects.Text;
   private dialogBody!: Phaser.GameObjects.Text;
   private dialogOpen = false;
+  private dialogChoices: Phaser.GameObjects.Text[] = []; // live choice rows, rebuilt per node
+  private dialogNode: DialogNode | null = null;
 
   private hud!: Phaser.GameObjects.Text;
 
@@ -273,7 +282,9 @@ export class WorldScene extends Phaser.Scene {
           return;
         }
         if (this.dialogOpen) {
-          this.closeDialog();
+          const choice = currentlyOver.find((o) => o.getData("choiceIdx") !== undefined);
+          if (choice) this.selectChoice(choice.getData("choiceIdx") as number);
+          else this.closeDialog(); // a click anywhere else leaves the conversation
           return;
         }
         const btn = currentlyOver.find((o) => o.getData("buildBtn") !== undefined);
@@ -548,10 +559,8 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private buildDialog(): void {
-    const w = 480;
-    const h = 104;
-    const x = VIEW_W / 2;
-    const y = VIEW_H - 70;
+    const w = DIALOG_W;
+    const h = DIALOG_H;
     const panel = this.add.rectangle(0, 0, w, h, 0x141c12, 0.94).setStrokeStyle(2, 0x6f8c5a);
     this.dialogName = this.add
       .text(-w / 2 + 14, -h / 2 + 10, "", {
@@ -571,14 +580,14 @@ export class WorldScene extends Phaser.Scene {
       })
       .setOrigin(0, 0);
     const hint = this.add
-      .text(w / 2 - 12, h / 2 - 10, "click to close", {
+      .text(w / 2 - 12, h / 2 - 10, "pick a reply · click away to leave", {
         fontFamily: "monospace",
         fontSize: "10px",
         color: "#9fb08a",
       })
       .setOrigin(1, 1);
     this.dialog = this.add
-      .container(x, y, [panel, this.dialogName, this.dialogBody, hint])
+      .container(DIALOG_X, DIALOG_Y, [panel, this.dialogName, this.dialogBody, hint])
       .setScrollFactor(0)
       .setDepth(UI_DEPTH + 1)
       .setVisible(false);
@@ -595,55 +604,86 @@ export class WorldScene extends Phaser.Scene {
   private openDialog(ind: Individual): void {
     this.talkedTo.add(ind.id); // every conversation counts toward "talk to N villagers"
     const q = this.quests.find((x) => x.giverId === ind.id && x.state !== "done");
+    const notable = notableById(this.ctrl.sim.living).get(ind.id)?.[0];
+    const node = buildDialogue({
+      ind,
+      era: this.ctrl.sim.state.era,
+      notable: notable && { title: notable.title, detail: notable.detail },
+      quest: q && {
+        desc: q.desc,
+        state: q.state,
+        reward: q.reward,
+        progress: this.questProgress(q),
+        target: q.target,
+      },
+      seed: ind.id,
+      onAccept: () => q && this.acceptQuest(q),
+      onTurnIn: () => q && this.turnInQuest(q),
+    });
     this.dialogName.setText(individualName(ind));
-    this.dialogBody.setText(q ? this.questLine(q) : this.lineFor(ind));
+    this.showNode(node);
     this.dialog.setVisible(true);
     this.dialogOpen = true;
     this.hoverLabel.setVisible(false);
   }
 
-  /** Talking to a giver accepts an available quest, or turns in a finished one. */
-  private questLine(q: Quest): string {
-    if (q.state === "available") {
-      q.state = "active";
-      q.start = questMetric(q, this.questMetrics());
-      this.flash(`Task accepted: ${q.desc}`);
-      this.tutorialEvent("quest");
-      return `A task for you: ${q.desc}. Come back when it's done for ${q.reward.amount} ${q.reward.res}.`;
-    }
-    if (q.state === "ready") {
-      q.state = "done";
-      this.ctrl.sim.state.resources[q.reward.res] += q.reward.amount;
-      this.flash(`Quest complete! +${q.reward.amount} ${q.reward.res}`);
-      return `Well done! Take these ${q.reward.amount} ${q.reward.res} with my thanks.`;
-    }
-    return `${q.desc} — ${Math.min(this.questProgress(q), q.target)}/${q.target}. Come back when it's done.`;
+  /** Render one conversation beat: body line + a clickable row per choice. */
+  private showNode(node: DialogNode): void {
+    this.dialogNode = node;
+    this.dialogBody.setText(node.body);
+    this.dialogChoices.forEach((c) => c.destroy());
+    this.dialogChoices = [];
+    // Choices stack below the body, in screen space so hit-testing is simple.
+    const left = DIALOG_X - DIALOG_W / 2 + 20;
+    const bodyBottom = DIALOG_Y - DIALOG_H / 2 + 34 + this.dialogBody.height;
+    node.choices.forEach((choice, i) => {
+      const row = this.add
+        .text(left, bodyBottom + 10 + i * 18, `› ${choice.label}`, {
+          fontFamily: "monospace",
+          fontSize: "12px",
+          color: "#cfe0a8",
+        })
+        .setOrigin(0, 0)
+        .setScrollFactor(0)
+        .setDepth(UI_DEPTH + 2)
+        .setInteractive({ useHandCursor: true });
+      row.setData("choiceIdx", i);
+      row.on("pointerover", () => row.setColor("#ffe08a"));
+      row.on("pointerout", () => row.setColor("#cfe0a8"));
+      this.dialogChoices.push(row);
+    });
+  }
+
+  /** Run the picked choice's effect, then advance to its node or close. */
+  private selectChoice(idx: number): void {
+    const choice = this.dialogNode?.choices[idx];
+    if (!choice) return;
+    const next = choice.next();
+    if (next) this.showNode(next);
+    else this.closeDialog();
+  }
+
+  /** Accept an available quest: set it running and snapshot its progress. */
+  private acceptQuest(q: Quest): void {
+    q.state = "active";
+    q.start = questMetric(q, this.questMetrics());
+    this.flash(`Task accepted: ${q.desc}`);
+    this.tutorialEvent("quest");
+  }
+
+  /** Turn in a ready quest: mark it done and pay out the reward. */
+  private turnInQuest(q: Quest): void {
+    q.state = "done";
+    this.ctrl.sim.state.resources[q.reward.res] += q.reward.amount;
+    this.flash(`Quest complete! +${q.reward.amount} ${q.reward.res}`);
   }
 
   private closeDialog(): void {
     this.dialog.setVisible(false);
     this.dialogOpen = false;
-  }
-
-  /** A short, in-character line, coloured by who this person is in the sim. */
-  private lineFor(ind: Individual): string {
-    const notable = notableById(this.ctrl.sim.living).get(ind.id)?.[0];
-    const era = this.ctrl.sim.state.era;
-    if (notable) {
-      return `They call me ${notable.title} — ${notable.detail}. The tribe endures, and so do I.`;
-    }
-    const top = (Object.keys(ind.genome) as (keyof Individual["genome"])[]).reduce((a, b) =>
-      ind.genome[b] > ind.genome[a] ? b : a,
-    );
-    const byTrait: Record<string, string> = {
-      strength: "These hands haul and hunt for the band.",
-      intelligence: "I watch the sky and remember what the old ones taught.",
-      dexterity: "Give me flint and I'll knap you a fine edge.",
-      coldTolerance: "The frost doesn't bite me the way it bites the young.",
-      diseaseResistance: "Fever came through camp, and still I stand.",
-      speech: "Sit — let me tell you how we came to this place.",
-    };
-    return `${byTrait[top] ?? "We follow you, chieftain."}  (${era}, age ${ind.age})`;
+    this.dialogNode = null;
+    this.dialogChoices.forEach((c) => c.destroy());
+    this.dialogChoices = [];
   }
 
   // ── building ───────────────────────────────────────────────────────────────
