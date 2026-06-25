@@ -17,6 +17,7 @@ import { freshStall, stepStall, type StallTracker } from "./moveStall.js";
 import { stepGather } from "./gatherCadence.js";
 import { gatherApproach } from "./gatherApproach.js";
 import { movePingStyle } from "./movePing.js";
+import { movePingColor } from "./movePingColor.js";
 import { gatherPulseTint } from "./gatherPulse.js";
 import { gatherUrgencyPeak } from "./gatherUrgency.js";
 import { gatherSwingAngle } from "./gatherSwing.js";
@@ -95,6 +96,7 @@ const CAMERA_LEAD = 64;
 const CAMERA_LEAD_LERP = 4;
 const MOVE_PING_MS = 420; // lifetime of the click-to-move destination ripple
 const MOVE_PING_R = 14; // base radius of the ping ring, scaled by movePingStyle
+const MOVE_PING_WALK = 0xfff2c8; // calm stroke for a plain ground order (gather orders tint by resource)
 const FOG_CELL = 64;
 const FOG_DEPTH = 5000;
 
@@ -562,7 +564,7 @@ export class WorldScene extends Phaser.Scene {
     // by movePingStyle. Sits just under the fog so it reads as a ground mark.
     this.moveMark = this.add
       .circle(0, 0, MOVE_PING_R)
-      .setStrokeStyle(2.5, 0xfff2c8, 0.95)
+      .setStrokeStyle(2.5, MOVE_PING_WALK, 0.95)
       .setDepth(FOG_DEPTH - 3)
       .setVisible(false);
 
@@ -676,7 +678,7 @@ export class WorldScene extends Phaser.Scene {
             GATHER_APPROACH_STOP,
           );
           if (approach) this.moveTarget = approach; // null ⇒ already in reach, just ping
-          this.pingMove(clickedNode.sprite.x, clickedNode.sprite.y);
+          this.pingMove(clickedNode.sprite.x, clickedNode.sprite.y, clickedNode.kind);
           return;
         }
         this.moveTarget = { x: pointer.worldX, y: pointer.worldY };
@@ -3453,11 +3455,18 @@ export class WorldScene extends Phaser.Scene {
     this.cameras.main.setFollowOffset(-this.leadX, -this.leadY);
   }
 
-  /** Fire the click-to-move ripple at a destination, restarting any live one. */
-  private pingMove(wx: number, wy: number): void {
+  /**
+   * Fire the click-to-move ripple at a destination, restarting any live one.
+   * A `kind` tints the ring to that resource's colour so a "walk over and gather
+   * that node" order reads differently from a plain ground walk; null is a walk.
+   */
+  private pingMove(wx: number, wy: number, kind: ResKind | null = null): void {
     this.moveMarkAge = 0;
     this.moveStall = null; // new destination: seed a fresh stall track next frame
-    this.moveMark.setPosition(wx, wy).setVisible(true);
+    this.moveMark
+      .setStrokeStyle(2.5, movePingColor(kind, RES_COLOR, MOVE_PING_WALK), 0.95)
+      .setPosition(wx, wy)
+      .setVisible(true);
   }
 
   /** Expand-and-fade the destination ping over its lifetime, then hide it. */
