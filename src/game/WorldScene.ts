@@ -151,6 +151,13 @@ const GIFT_COOLDOWN_MS = 600; // a brief pause between gifts
 const ECONOMY_TICK_MS = 7000;
 /** Carrying-capacity each player-built hut adds — more shelter, more people. */
 const HUT_CAPACITY = 4;
+/**
+ * Economy beats between epidemic rolls in the played world. The sim then gates
+ * each roll on population and a chance (see {@link Simulation.rollEpidemic}); at
+ * {@link ECONOMY_TICK_MS} this spaces possible outbreaks ~1 minute apart, so the
+ * risk readout on the HUD becomes a real, occasional threat rather than decoration.
+ */
+const EPIDEMIC_EVERY = 9;
 
 const RAID_FIRST_MS = 45000; // first raid only after the player has settled in
 const RAID_REPEAT_MS = 120000; // quiet stretch between raids
@@ -340,6 +347,7 @@ export class WorldScene extends Phaser.Scene {
   private econHud!: Phaser.GameObjects.Text;
   private economyTimer = 0;
   private foodTrend = 0; // net food change across the most recent economy tick
+  private epidemicBeats = 0; // economy beats since the last outbreak roll
 
   // Belief: a ritual at any campfire offers food and accrues the sim's existing
   // Culture track; a HUD line shows the belief total/stage and a burst marks
@@ -1426,6 +1434,8 @@ export class WorldScene extends Phaser.Scene {
     this.farmHarvests = 0;
     this.gathered = { wood: 0, food: 0, stone: 0 };
     this.talkedTo = new Set();
+    this.economyTimer = 0;
+    this.epidemicBeats = 0;
   }
 
   private toggleBuild(id: string, keyboard = false): void {
@@ -2486,6 +2496,33 @@ export class WorldScene extends Phaser.Scene {
     const popAfter = sim.living.length;
     if (popAfter > popBefore) this.flash(`A child is born — the tribe is ${popAfter} strong`);
     else if (popAfter < popBefore) this.flash(`${popBefore - popAfter} of the tribe lost`);
+
+    // Occasionally roll the sim's epidemic on top of the beat, so the outbreak
+    // risk shown on the HUD is a real, periodic threat — and the player's levers
+    // against it (research medicine at the totem, build huts to thin the crowd)
+    // genuinely matter. The sim gates and resolves the outbreak; we just surface it.
+    if (++this.epidemicBeats >= EPIDEMIC_EVERY) {
+      this.epidemicBeats = 0;
+      const lost = sim.rollEpidemic(this.housingCapacity());
+      if (lost > 0) this.onOutbreak(lost);
+    }
+  }
+
+  /** A sickly pulse + note when the sim's epidemic claims villagers this beat. */
+  private onOutbreak(deaths: number): void {
+    this.flash(`🦠 An outbreak sweeps the camp — ${deaths} lost to fever`);
+    // A brief, screen-wide sickly-green wash so the loss reads even off the HUD.
+    const wash = this.add
+      .rectangle(VIEW_W / 2, VIEW_H / 2, VIEW_W, VIEW_H, 0x4a7a2a, 0.34)
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH + 3);
+    this.tweens.add({
+      targets: wash,
+      alpha: 0,
+      duration: 900,
+      ease: "Quad.easeOut",
+      onComplete: () => wash.destroy(),
+    });
   }
 
   // ── belief (rituals at the campfire) ─────────────────────────────────────────

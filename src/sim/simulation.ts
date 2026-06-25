@@ -978,6 +978,36 @@ export class Simulation {
     if (before - this.living.length >= 2) this.emitDialogue("death");
   }
 
+  /**
+   * Roll one outbreak on demand for the directly-played world (WorldScene), which
+   * advances time through {@link economyTick} and so never fires the event-driven
+   * {@link maybeEpidemic}. The caller paces *when* to roll (the headless {@link tick}
+   * uses a fixed tick interval instead); this applies the SAME population/chance
+   * gate, severity model and mortality selection on the same separate
+   * {@link epidemicRng} stream, with the player's housing folded into carrying
+   * capacity exactly as {@link economyTick} does. Returns the death toll so the
+   * scene can surface the loss. Never called by the headless autopilot, so it
+   * cannot perturb the balance or replay of `npm run sim`.
+   */
+  rollEpidemic(housingBonus = 0): number {
+    const s = this.state;
+    if (this.living.length < BALANCE.epidemicMinPop) return 0;
+    if (!this.epidemicRng.chance(BALANCE.epidemicChance)) return 0;
+    const effects = s.knowledge.aggregateEffects();
+    s.culture.foldInto(effects);
+    s.policies.foldInto(effects);
+    this.applyLeaderBonus(effects);
+    effects.capacityBonus += Math.max(0, housingBonus);
+    const deaths = this.triggerEpidemic(effects);
+    this.logEvent(
+      "disease",
+      deaths > 0
+        ? `An epidemic sweeps the crowded camp — ${deaths} lost.`
+        : "An epidemic passes through, but the tribe holds.",
+    );
+    return deaths;
+  }
+
   /** Resolve a pending encounter. Accepting injects new, archetype-leaning kin. */
   resolveEncounter(accept: boolean): void {
     resolveEncounterImpl(this.eng, accept);
