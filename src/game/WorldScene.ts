@@ -18,6 +18,7 @@ import { buildDialogue, type DialogNode } from "./dialogue.js";
 import { buildRaidSides, resolveRaid } from "./raidDefense.js";
 import { outbreakRisk } from "./epidemicRisk.js";
 import { isPointVisible } from "./cull.js";
+import { BURST_STYLE, questCelebrationCount } from "./feedback.js";
 import {
   TUTORIAL_STEPS,
   advanceTutorial,
@@ -1166,6 +1167,13 @@ export class WorldScene extends Phaser.Scene {
     this.ctrl.sim.state.resources[q.reward.res] += q.reward.amount;
     this.flash(`Quest complete! +${q.reward.amount} ${q.reward.res}`);
     this.audio.questComplete();
+    // Celebrate the turn-in at the giver: the reward floats up in its resource
+    // colour over a cyan burst whose size swells with how fat the payout was.
+    const giver = this.npcs.find((n) => n.ind.id === q.giverId)?.sprite;
+    const gx = giver ? giver.x : this.player.x;
+    const gy = (giver ? giver.y : this.player.y) - 20;
+    this.floatGain(gx, gy, `+${q.reward.amount} ${q.reward.res}`, RES_TEXT[q.reward.res]);
+    this.popParticles(gx, gy, BURST_STYLE.quest.color, questCelebrationCount(q.reward.amount));
   }
 
   private closeDialog(): void {
@@ -2689,9 +2697,9 @@ export class WorldScene extends Phaser.Scene {
   }
 
   /** A small radial burst of fading dots at a world point — the gather "pop". */
-  private popParticles(x: number, y: number, color: number): void {
+  private popParticles(x: number, y: number, color: number, count = 7): void {
     if (!this.onScreen(x, y)) return;
-    const n = 7;
+    const n = count;
     for (let i = 0; i < n; i++) {
       const a = (Math.PI * 2 * i) / n + Math.random() * 0.6;
       const dist = 10 + Math.random() * 14;

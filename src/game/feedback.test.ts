@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { burstForEvent, BURST_STYLE, type FeedbackKind } from "./feedback.js";
+import {
+  burstForEvent,
+  BURST_STYLE,
+  questCelebrationCount,
+  type FeedbackKind,
+} from "./feedback.js";
 
 describe("event feedback routing", () => {
   it("routes discoveries and raids to their own burst", () => {
@@ -26,5 +31,13 @@ describe("event feedback routing", () => {
       expect(s.count).toBeGreaterThan(0);
       expect(s.count).toBeLessThanOrEqual(12); // stays tasteful and cheap
     }
+  });
+
+  it("swells the quest turn-in burst with the reward, but keeps it capped", () => {
+    const base = BURST_STYLE.quest.count;
+    expect(questCelebrationCount(0)).toBe(base); // no reward bonus
+    expect(questCelebrationCount(12)).toBe(base + 3); // floor(12/4) bonus
+    expect(questCelebrationCount(15)).toBeGreaterThan(questCelebrationCount(8)); // fatter payout pops fatter
+    expect(questCelebrationCount(1000)).toBeLessThanOrEqual(14); // never floods the scene
   });
 });
