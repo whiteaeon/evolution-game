@@ -12,6 +12,7 @@ import {
 import { HOMININ_WALK, homininFrameKey } from "./homininWalk.js";
 import { chooseNpcActivity, type NpcActivity } from "./npcActivity.js";
 import { pickGatherTarget } from "./gatherTarget.js";
+import { arrivalSpeed } from "./arrival.js";
 import { stepGather } from "./gatherCadence.js";
 import { movePingStyle } from "./movePing.js";
 import { gatherPulseTint } from "./gatherPulse.js";
@@ -71,6 +72,9 @@ const PLAYER_SPEED = 142; // px/sec top speed
 // rather than snapping between full speed and frozen.
 const PLAYER_ACCEL = 10; // spin-up: brisk but not instant
 const PLAYER_DECEL = 14; // stopping: a short glide, never a long skid
+// Click-to-move eases its target speed down inside this radius of the clicked
+// destination, so the chieftain settles onto the spot instead of overshooting.
+const ARRIVE_RADIUS = 48;
 const PLAYER_SCALE = 1.15;
 // How far ahead the camera looks in the travel direction, and the lerp that
 // eases the lead in/out so reversing course doesn't whip the view.
@@ -3179,21 +3183,26 @@ export class WorldScene extends Phaser.Scene {
     if (down(this.keys.up)) dy -= 1;
     if (down(this.keys.down)) dy += 1;
 
+    // Click-to-move eases its target speed down on approach (arrival steering);
+    // WASD stays at full speed. Default to top speed for the keyboard path.
+    let targetSpeed = PLAYER_SPEED;
     if (dx || dy) this.moveTarget = null; // keys override a click destination
     else if (this.moveTarget) {
       const tdx = this.moveTarget.x - this.player.x;
       const tdy = this.moveTarget.y - this.player.y;
-      if (Math.hypot(tdx, tdy) < 4) this.moveTarget = null;
+      const dist = Math.hypot(tdx, tdy);
+      if (dist < 4) this.moveTarget = null;
       else {
         dx = tdx;
         dy = tdy;
+        targetSpeed = arrivalSpeed(dist, PLAYER_SPEED, ARRIVE_RADIUS);
       }
     }
 
     const len = Math.hypot(dx, dy);
-    // Target velocity: full speed along the desired heading, or zero when idle.
-    const tvx = len > 0.001 ? (dx / len) * PLAYER_SPEED : 0;
-    const tvy = len > 0.001 ? (dy / len) * PLAYER_SPEED : 0;
+    // Target velocity: chosen speed along the desired heading, or zero when idle.
+    const tvx = len > 0.001 ? (dx / len) * targetSpeed : 0;
+    const tvy = len > 0.001 ? (dy / len) * targetSpeed : 0;
     // Ease velocity toward the target — accelerating into motion, gliding out of
     // it — so WASD taps and click destinations both land with a bit of weight.
     const ramp = Math.min(1, (len > 0.001 ? PLAYER_ACCEL : PLAYER_DECEL) * sec);
