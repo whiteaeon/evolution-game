@@ -18,6 +18,7 @@ import { stepGather } from "./gatherCadence.js";
 import { gatherApproach } from "./gatherApproach.js";
 import { movePingStyle } from "./movePing.js";
 import { gatherPulseTint } from "./gatherPulse.js";
+import { gatherSwingAngle } from "./gatherSwing.js";
 import { gatherFacing } from "./gatherFacing.js";
 import { gatherPromptText } from "./gatherPrompt.js";
 import { depletionScale } from "./nodeDepletion.js";
@@ -157,6 +158,9 @@ const GATHER_HILITE = 0xffd27a;
 /** Brighter peak the aim highlight breathes toward, and the cycle length (ms). */
 const GATHER_HILITE_PEAK = 0xfff0d0;
 const GATHER_HILITE_PULSE_MS = 900;
+/** A harvest strike leans the chieftain this far (deg) over this long (ms). */
+const GATHER_SWING_DEG = 12;
+const GATHER_SWING_MS = 260;
 
 /** One study session at the totem: spend this much food, gain this much insight. */
 const STUDY_FOOD = 5;
@@ -370,6 +374,7 @@ export class WorldScene extends Phaser.Scene {
   private activeParticles = 0; // live decorative dots, capped by MAX_PARTICLES
   private gatherTarget: Gatherable | null = null; // sticky aimed node, highlighted for the player
   private gatherHiliteTime = 0; // ms into the aim highlight's breathing pulse; resets on re-aim
+  private gatherSwingTime = GATHER_SWING_MS; // ms into the body's harvest-strike lean; starts spent (upright)
   // Diegetic audio: synthesized SFX + a biome/time-of-day ambient bed, silent
   // until a user gesture resumes it and behind the mute toggle (see ../ui/audio).
   private audio = new WorldAudio();
@@ -2675,6 +2680,12 @@ export class WorldScene extends Phaser.Scene {
   // ── gathering ────────────────────────────────────────────────────────────
 
   private updateGather(dt: number): void {
+    // Advance and apply the body's harvest-strike lean (0 once spent, so the
+    // chieftain settles upright). Each landed swing resets the timer in gather().
+    // Signed by facing so the lean drives toward whichever side the node is on.
+    this.gatherSwingTime += dt;
+    const swingSign = this.player.flipX ? -1 : 1;
+    this.player.setAngle(swingSign * gatherSwingAngle(this.gatherSwingTime, GATHER_SWING_MS, GATHER_SWING_DEG));
     // Sticky targeting: keep the aimed node steady so the prompt — and the node
     // Space harvests — doesn't flicker between two nearby nodes as the player drifts.
     const prev = this.gatherTarget ? this.gatherables.indexOf(this.gatherTarget) : -1;
@@ -2728,6 +2739,7 @@ export class WorldScene extends Phaser.Scene {
     this.gathered[node.kind] += amt;
     if (node.farm) this.farmHarvests += amt; // food taken from a farm the player placed
     node.amount -= 1; // one swing depletes the node by one regardless of yield
+    this.gatherSwingTime = 0; // kick the body's strike lean so the swing reads as a chop
     this.tutorialEvent("gather"); // cooldown is paced by updateGather's stepGather
 
     const spr = node.sprite;
