@@ -23,6 +23,8 @@ import { TechGraph } from "./techgraph.js";
 import { keyboardShortcut } from "./shortcuts.js";
 import { eraSpans, traitDeltas, summaryHTML, type EraEntry } from "./summary.js";
 import { questLogHTML } from "./quests.js";
+import { codexHTML } from "./codex.js";
+import { CODEX_ENTRIES, isUnlocked, type CodexContext } from "../sim/index.js";
 
 const TRAIT_LABEL: Record<TraitName, string> = {
   strength: "Strength",
@@ -200,6 +202,11 @@ export class UIOverlay {
         <div class="quests" data-el="quests"></div>
       </div>
 
+      <div class="panel">
+        <h2>Codex <span class="dim" data-el="codex-count"></span></h2>
+        <div class="codex" data-el="codex"></div>
+      </div>
+
       <div class="panel grow">
         <h2>Chronicle</h2>
         <div class="log" data-el="log"></div>
@@ -260,7 +267,7 @@ export class UIOverlay {
     for (const k of [
       "era", "year", "gen", "pop", "season", "goal", "goal-text", "eratrack", "resources", "legacy", "difficulty",
       "traits", "graph", "labor", "tasks", "lang", "techtree", "badges", "ach-count",
-      "quests", "quest-count", "log",
+      "quests", "quest-count", "codex", "codex-count", "log",
       "encounter", "encounter-text", "choice", "choice-title", "choice-text",
       "endscreen", "end-title", "end-body", "end-summary", "end-card", "tutorial",
     ]) {
@@ -404,6 +411,7 @@ export class UIOverlay {
     this.renderTechTree(s);
     this.renderBadges();
     this.renderQuests(s);
+    this.renderCodex(s);
     this.sampleAndDrawGraph(avg.count, avg.traits.intelligence);
 
     this.el.log.innerHTML = s.log
@@ -515,6 +523,29 @@ export class UIOverlay {
       }
     }
     this.questsPrimed = true;
+  }
+
+  private lastCodexSig = "";
+
+  /**
+   * Render the lore codex: the entries discovered so far, grouped by category.
+   * Discovery is derived purely from sim state, so the codex stays a read-only
+   * layer over the simulation. Re-renders only when the set of discoveries grows.
+   */
+  private renderCodex(s: GameController["sim"]["state"]): void {
+    const t = s.totals;
+    const ctx: CodexContext = {
+      discoveredTechs: s.knowledge.discovered,
+      visitedBiomes: t.biomesVisited ?? [],
+      interbredLineages: t.lineagesInterbred,
+      seenEventChains: t.eventChainsSeen ?? [],
+    };
+    const sig = `${s.knowledge.discovered.size}|${ctx.visitedBiomes.length}|${ctx.interbredLineages.length}|${ctx.seenEventChains.length}`;
+    if (sig === this.lastCodexSig && this.el.codex.childElementCount) return;
+    this.lastCodexSig = sig;
+    const found = CODEX_ENTRIES.filter((e) => isUnlocked(e, ctx)).length;
+    this.el["codex-count"].textContent = `(${found}/${CODEX_ENTRIES.length} discovered)`;
+    this.el.codex.innerHTML = codexHTML(CODEX_ENTRIES, ctx);
   }
 
   /** Show a subtle, self-dismissing toast above the world. */

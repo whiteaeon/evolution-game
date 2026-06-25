@@ -157,6 +157,17 @@ button.big { font-weight: 700; padding: 7px 14px; }
 .quest.done .qprog i { background: var(--good); }
 .quest-n { font-size: 10px; color: var(--ink-dim); font-variant-numeric: tabular-nums; float: right; margin-top: 2px; }
 
+/* lore codex */
+.codex { display: flex; flex-direction: column; gap: 10px; }
+.codex-group { display: flex; flex-direction: column; gap: 6px; }
+.codex-gh { font-size: 11px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em; }
+.codex-entry {
+  padding: 6px 8px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--panel2);
+}
+.codex-t { font-size: 12px; font-weight: 600; color: var(--ink); }
+.codex-l { font-size: 11px; color: var(--ink-dim); margin-top: 2px; }
+
 /* completion toasts */
 .toasts {
   position: fixed; top: 14px; left: 50%; transform: translateX(-50%);

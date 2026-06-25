@@ -6,4 +6,5 @@ export * from "./knowledge.js";
 export * from "./regions.js";
 export * from "./difficulty.js";
 export * from "./quests.js";
+export * from "./codex.js";
 export * from "./simulation.js";
