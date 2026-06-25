@@ -39,6 +39,7 @@ import {
   type TechId,
 } from "../sim/index.js";
 import { dispositionStyle } from "../ui/diplomacy.js";
+import { CONTROLS, QUEST_MARKER } from "./a11y.js";
 import { WorldAudio } from "../ui/audio.js";
 import type { GameController } from "./controller.js";
 
@@ -249,6 +250,15 @@ export class WorldScene extends Phaser.Scene {
   private ghost!: Phaser.GameObjects.Image;
   private ghostTile!: Phaser.GameObjects.Rectangle; // snapped footprint under the ghost
   private buildBtns: { type: BuildType; bg: Phaser.GameObjects.Rectangle }[] = [];
+  // When build mode is entered from the keyboard (digit keys), the ghost tracks
+  // the chieftain so it can be placed without a mouse; moving the mouse hands
+  // aiming back to the pointer.
+  private buildAimKeyboard = false;
+
+  // A toggleable controls/help overlay (? or H), so the whole game is legible
+  // and reachable from the keyboard alone.
+  private helpOverlay!: Phaser.GameObjects.Container;
+  private helpOpen = false;
 
   private solids: { x: number; y: number; r: number }[] = [];
   private gatherables: Gatherable[] = [];
@@ -370,6 +380,7 @@ export class WorldScene extends Phaser.Scene {
     this.buildQuestLog();
     this.buildTechPanel();
     this.buildInspectCard();
+    this.buildHelpOverlay();
     // A grid-snapped footprint sits under the ghost so the placement cell — and
     // whether it is affordable (green) or not (red) — is unmistakable.
     this.ghostTile = this.add
@@ -402,6 +413,10 @@ export class WorldScene extends Phaser.Scene {
       "pointerdown",
       (pointer: Phaser.Input.Pointer, currentlyOver: Phaser.GameObjects.GameObject[]) => {
         this.audio.resume(); // a click is a user gesture — opens audio (browser autoplay)
+        if (this.helpOpen) {
+          this.toggleHelp(); // a click anywhere dismisses the help overlay
+          return;
+        }
         if (currentlyOver.some((o) => o.getData("muteBtn"))) {
           this.toggleMute();
           return;
@@ -440,7 +455,7 @@ export class WorldScene extends Phaser.Scene {
           return;
         }
         if (this.buildMode) {
-          this.tryPlace(pointer);
+          this.tryPlace(this.snap(pointer.worldX), this.snap(pointer.worldY));
           return;
         }
         const ins = currentlyOver.find((o) => o.getData("inspectId") !== undefined);
@@ -462,15 +477,25 @@ export class WorldScene extends Phaser.Scene {
     );
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => this.updateGhost(p));
     this.input.keyboard!.on("keydown-ESC", () => {
-      if (this.techPanelOpen) this.closeTechPanel();
+      if (this.helpOpen) this.toggleHelp();
+      else if (this.dialogOpen) this.closeDialog();
+      else if (this.techPanelOpen) this.closeTechPanel();
       else if (this.inspectOpen) this.closeInspect();
       else this.cancelBuild();
     });
     this.input.keyboard!.on("keydown-L", () => this.toggleQuestLog());
     this.input.keyboard!.on("keydown-T", () => this.toggleTechPanel());
     this.input.keyboard!.on("keydown-M", () => this.toggleMute());
-    // Any key press is a user gesture, so movement keys enable audio too.
-    this.input.keyboard!.on("keydown", () => this.audio.resume());
+    this.input.keyboard!.on("keydown-H", () => this.toggleHelp());
+    this.input.keyboard!.on("keydown-E", () => this.interact()); // talk to a nearby villager
+    this.input.keyboard!.on("keydown-ENTER", () => this.confirm()); // place / reply / study
+    // Any key press is a user gesture (enables audio); "?" toggles help and the
+    // number row drives the build bar / dialog replies / research rows.
+    this.input.keyboard!.on("keydown", (e: KeyboardEvent) => {
+      this.audio.resume();
+      if (e.key === "?") this.toggleHelp();
+      else if (e.key >= "1" && e.key <= "9") this.handleDigit(Number(e.key));
+    });
 
     // First run only: teach the core loop with a dismissible staged overlay.
     if (!tutorialSeen()) this.startTutorial();
@@ -478,6 +503,98 @@ export class WorldScene extends Phaser.Scene {
 
   private key(name: string): Phaser.Input.Keyboard.Key {
     return this.input.keyboard!.addKey(name);
+  }
+
+  // ── keyboard-only interaction ────────────────────────────────────────────────
+
+  /** E: open a conversation with the nearest villager — talk without a mouse. */
+  private interact(): void {
+    if (this.helpOpen || this.dialogOpen || this.techPanelOpen || this.inspectOpen || this.buildMode)
+      return;
+    const npc = this.nearestNpc(56);
+    if (npc) this.openDialog(npc.ind);
+    else this.flash("No one nearby to talk to");
+  }
+
+  /** Enter: confirm the active context — pick the first reply, study, or place. */
+  private confirm(): void {
+    if (this.helpOpen) return;
+    if (this.dialogOpen) this.selectChoice(0);
+    else if (this.techPanelOpen) this.study();
+    else if (this.buildMode) this.tryPlace(this.ghost.x, this.ghost.y);
+  }
+
+  /** A number-row press, routed to whatever is in focus (dialog/research/build). */
+  private handleDigit(n: number): void {
+    if (this.helpOpen) return;
+    if (this.dialogOpen) {
+      this.selectChoice(n - 1);
+      return;
+    }
+    if (this.techPanelOpen) {
+      const id = this.ctrl.sim.state.knowledge.available().slice(0, 6)[n - 1];
+      if (id) this.chooseTech(id);
+      return;
+    }
+    const t = BUILD_TYPES[n - 1];
+    if (t) this.toggleBuild(t.id, true);
+  }
+
+  /** Nearest villager to the chieftain within range — the one E talks to. */
+  private nearestNpc(range: number): Npc | null {
+    let best: Npc | null = null;
+    let bestD = range;
+    for (const n of this.npcs) {
+      const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, n.sprite.x, n.sprite.y);
+      if (d < bestD) {
+        bestD = d;
+        best = n;
+      }
+    }
+    return best;
+  }
+
+  /** Build the controls/help overlay from the shared {@link CONTROLS} listing. */
+  private buildHelpOverlay(): void {
+    const w = 392;
+    const rowH = 18;
+    const h = 52 + CONTROLS.length * rowH;
+    const panel = this.add.rectangle(0, 0, w, h, 0x10140d, 0.96).setStrokeStyle(2, 0xffe08a);
+    const title = this.add
+      .text(-w / 2 + 16, -h / 2 + 12, "Controls", {
+        fontFamily: "monospace",
+        fontSize: "15px",
+        color: "#ffe08a",
+        fontStyle: "bold",
+      })
+      .setOrigin(0, 0);
+    const body = CONTROLS.map((c) => `${c.keys.padEnd(15)} ${c.action}`).join("\n");
+    const text = this.add
+      .text(-w / 2 + 16, -h / 2 + 40, body, {
+        fontFamily: "monospace",
+        fontSize: "12px",
+        color: "#e9e0c8",
+        lineSpacing: 6,
+      })
+      .setOrigin(0, 0);
+    const hint = this.add
+      .text(0, h / 2 - 8, "? or H or Esc to close", {
+        fontFamily: "monospace",
+        fontSize: "10px",
+        color: "#9fb08a",
+      })
+      .setOrigin(0.5, 1);
+    this.helpOverlay = this.add
+      .container(VIEW_W / 2, VIEW_H / 2, [panel, title, text, hint])
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH + 8)
+      .setVisible(false);
+  }
+
+  /** Show or hide the controls/help overlay (? or H). */
+  private toggleHelp(): void {
+    this.helpOpen = !this.helpOpen;
+    this.helpOverlay.setVisible(this.helpOpen);
   }
 
   // ── world build ────────────────────────────────────────────────────────────
@@ -717,10 +834,10 @@ export class WorldScene extends Phaser.Scene {
     this.gatherPrompt = this.add
       .text(0, 0, "", {
         fontFamily: "monospace",
-        fontSize: "11px",
+        fontSize: "13px",
         color: "#dff0c0",
         backgroundColor: "#000000aa",
-        padding: { x: 4, y: 2 },
+        padding: { x: 6, y: 3 },
       })
       .setOrigin(0.5, 1)
       .setScrollFactor(0)
@@ -730,10 +847,10 @@ export class WorldScene extends Phaser.Scene {
     this.ritualPrompt = this.add
       .text(0, 0, "", {
         fontFamily: "monospace",
-        fontSize: "11px",
+        fontSize: "13px",
         color: "#e8d0ff",
         backgroundColor: "#000000aa",
-        padding: { x: 4, y: 2 },
+        padding: { x: 6, y: 3 },
       })
       .setOrigin(0.5, 1)
       .setScrollFactor(0)
@@ -743,10 +860,10 @@ export class WorldScene extends Phaser.Scene {
     this.giftPrompt = this.add
       .text(0, 0, "", {
         fontFamily: "monospace",
-        fontSize: "11px",
+        fontSize: "13px",
         color: "#cfe0a8",
         backgroundColor: "#000000aa",
-        padding: { x: 4, y: 2 },
+        padding: { x: 6, y: 3 },
       })
       .setOrigin(0.5, 1)
       .setScrollFactor(0)
@@ -770,10 +887,10 @@ export class WorldScene extends Phaser.Scene {
     this.raidPrompt = this.add
       .text(0, 0, "", {
         fontFamily: "monospace",
-        fontSize: "11px",
+        fontSize: "13px",
         color: "#ffd2c2",
         backgroundColor: "#000000aa",
-        padding: { x: 4, y: 2 },
+        padding: { x: 6, y: 3 },
       })
       .setOrigin(0.5, 1)
       .setScrollFactor(0)
@@ -781,7 +898,7 @@ export class WorldScene extends Phaser.Scene {
       .setVisible(false);
 
     this.add
-      .text(VIEW_W / 2, 28, "WASD/click move · click a villager · Space gather · R ritual · G gift · F rally · build bar · L quests · T research · M sound", {
+      .text(VIEW_W / 2, 28, "WASD move · E talk · Space gather · 1/2/3 build + Enter · R ritual · G gift · F rally · L quests · T research · M sound · ? help", {
         fontFamily: "monospace",
         fontSize: "10px",
         color: "#cfe0d0",
@@ -859,7 +976,7 @@ export class WorldScene extends Phaser.Scene {
       })
       .setOrigin(0, 0);
     const hint = this.add
-      .text(w / 2 - 12, h / 2 - 10, "pick a reply · click away to leave", {
+      .text(w / 2 - 12, h / 2 - 10, "press 1–9 or click a reply · Esc to leave", {
         fontFamily: "monospace",
         fontSize: "10px",
         color: "#9fb08a",
@@ -917,7 +1034,7 @@ export class WorldScene extends Phaser.Scene {
     const bodyBottom = DIALOG_Y - DIALOG_H / 2 + 34 + this.dialogBody.height;
     node.choices.forEach((choice, i) => {
       const row = this.add
-        .text(left, bodyBottom + 10 + i * 18, `› ${choice.label}`, {
+        .text(left, bodyBottom + 10 + i * 18, `${i + 1}. ${choice.label}`, {
           fontFamily: "monospace",
           fontSize: "12px",
           color: "#cfe0a8",
@@ -970,11 +1087,12 @@ export class WorldScene extends Phaser.Scene {
   // ── building ───────────────────────────────────────────────────────────────
 
   private buildBuildBar(): void {
-    const y = VIEW_H - 44;
+    // Bigger buttons = easier hit targets; a corner badge shows the 1/2/3 shortcut.
+    const y = VIEW_H - 50;
     BUILD_TYPES.forEach((t, i) => {
-      const bx = 10 + i * 60;
+      const bx = 10 + i * 74;
       const bg = this.add
-        .rectangle(bx, y, 56, 30, 0x12180e, 0.7)
+        .rectangle(bx, y, 70, 40, 0x12180e, 0.78)
         .setOrigin(0, 0)
         .setStrokeStyle(1, 0x6f8c5a)
         .setScrollFactor(0)
@@ -982,14 +1100,23 @@ export class WorldScene extends Phaser.Scene {
         .setInteractive({ useHandCursor: true });
       bg.setData("buildBtn", t.id);
       this.add
-        .image(bx + 13, y + 15, t.icon)
-        .setDisplaySize(16, 16)
+        .text(bx + 5, y + 3, `${i + 1}`, {
+          fontFamily: "monospace",
+          fontSize: "10px",
+          color: "#ffe08a",
+          fontStyle: "bold",
+        })
+        .setScrollFactor(0)
+        .setDepth(UI_DEPTH + 2);
+      this.add
+        .image(bx + 16, y + 25, t.icon)
+        .setDisplaySize(18, 18)
         .setScrollFactor(0)
         .setDepth(UI_DEPTH + 1);
       this.add
-        .text(bx + 24, y + 5, `${t.label}\n${t.cost.amount} ${t.cost.res}`, {
+        .text(bx + 29, y + 6, `${t.label}\n${t.cost.amount} ${t.cost.res}`, {
           fontFamily: "monospace",
-          fontSize: "8px",
+          fontSize: "9px",
           color: "#e9e0c8",
           lineSpacing: 2,
         })
@@ -999,7 +1126,7 @@ export class WorldScene extends Phaser.Scene {
     });
   }
 
-  private toggleBuild(id: string): void {
+  private toggleBuild(id: string, keyboard = false): void {
     const t = BUILD_TYPES.find((b) => b.id === id);
     if (!t) return;
     if (this.buildMode?.id === id) {
@@ -1007,9 +1134,11 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
     this.buildMode = t;
+    this.buildAimKeyboard = keyboard;
     this.ghost.setTexture(t.icon).setVisible(true);
     this.ghostTile.setVisible(true);
     this.highlightBuildBtns();
+    if (keyboard) this.updateBuildAim(); // snap the ghost to the chieftain at once
   }
 
   private cancelBuild(): void {
@@ -1032,8 +1161,20 @@ export class WorldScene extends Phaser.Scene {
 
   private updateGhost(p: Phaser.Input.Pointer): void {
     if (!this.buildMode) return;
-    const wx = this.snap(p.worldX);
-    const wy = this.snap(p.worldY);
+    this.buildAimKeyboard = false; // moving the mouse takes over aiming
+    this.positionGhost(this.snap(p.worldX), this.snap(p.worldY));
+  }
+
+  /** When aiming a build from the keyboard, keep the ghost on the tile just in
+   *  front of the chieftain's feet so it can be placed without a mouse. */
+  private updateBuildAim(): void {
+    if (!this.buildMode || !this.buildAimKeyboard) return;
+    this.positionGhost(this.snap(this.player.x), this.snap(this.player.y + TILE));
+  }
+
+  /** Move the build ghost + footprint to a snapped tile and tint by affordability. */
+  private positionGhost(wx: number, wy: number): void {
+    if (!this.buildMode) return;
     this.ghost.setPosition(wx, wy);
     this.ghostTile.setPosition(wx, wy);
     const cost = this.buildMode.cost;
@@ -1044,7 +1185,7 @@ export class WorldScene extends Phaser.Scene {
     this.ghostTile.setFillStyle(col, 0.22).setStrokeStyle(1.5, col, 0.9);
   }
 
-  private tryPlace(p: Phaser.Input.Pointer): void {
+  private tryPlace(wx: number, wy: number): void {
     const t = this.buildMode;
     if (!t) return;
     const res = this.ctrl.sim.state.resources;
@@ -1053,8 +1194,6 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
     res[t.cost.res] -= t.cost.amount;
-    const wx = this.snap(p.worldX);
-    const wy = this.snap(p.worldY);
     if (t.id === "farm") {
       // A farm is flat ground you walk over — and a renewable food source.
       const crop = this.add.image(wx, wy, "crop").setDepth(2);
@@ -1079,7 +1218,7 @@ export class WorldScene extends Phaser.Scene {
     }
     this.dustBurst(wx, wy); // a kick of dust as it lands
     this.audio.build(true);
-    this.updateGhost(p); // refresh the affordability tint after spending
+    this.positionGhost(wx, wy); // refresh the affordability tint after spending
   }
 
   /** Refuse a placement loudly: reason text, a red ghost shake, and a low buzz. */
@@ -1233,6 +1372,7 @@ export class WorldScene extends Phaser.Scene {
   override update(_t: number, dt: number): void {
     this.ctrl.update(dt); // keeps the world model alive (no-op while paused)
     this.movePlayer(dt);
+    this.updateBuildAim();
     this.updateNpcs(dt);
     this.updateGather(dt);
     this.updateRitual(dt);
@@ -1409,13 +1549,24 @@ export class WorldScene extends Phaser.Scene {
       const marker = this.questMarkers.get(q.giverId);
       const giver = this.npcs.find((n) => n.ind.id === q.giverId);
       if (marker && giver) {
-        const sym = q.state === "available" ? "!" : q.state === "ready" ? "?" : "";
+        // Colourblind-safe: a distinct glyph AND colour per state, not hue alone.
+        const style =
+          q.state === "available"
+            ? QUEST_MARKER.available
+            : q.state === "ready"
+              ? QUEST_MARKER.ready
+              : null;
         const bob = Math.sin(this.time.now / 250) * 2;
-        marker
-          .setText(sym)
-          .setVisible(sym !== "")
-          .setPosition(giver.sprite.x, giver.sprite.y - giver.sprite.displayHeight + bob)
-          .setDepth(giver.sprite.y + 1);
+        if (style) {
+          marker
+            .setText(style.glyph)
+            .setColor(style.color)
+            .setVisible(true)
+            .setPosition(giver.sprite.x, giver.sprite.y - giver.sprite.displayHeight + bob)
+            .setDepth(giver.sprite.y + 1);
+        } else {
+          marker.setVisible(false);
+        }
       }
       if (!tracker && (q.state === "active" || q.state === "ready")) {
         const who = this.giverName(q.giverId);
@@ -1479,7 +1630,7 @@ export class WorldScene extends Phaser.Scene {
     const lines = open.map((q) => {
       const who = this.giverName(q.giverId);
       if (q.state === "available") return `• ${q.desc}\n   from ${who} — talk to accept (!)`;
-      if (q.state === "ready") return `• ${q.desc}\n   ✓ done — return to ${who} (?)`;
+      if (q.state === "ready") return `• ${q.desc}\n   ✓ done — return to ${who} (✓)`;
       const p = Math.min(this.questProgress(q), q.target);
       return `• ${q.desc}\n   ${who} — ${p}/${q.target}`;
     });
@@ -1547,7 +1698,7 @@ export class WorldScene extends Phaser.Scene {
       })
       .setOrigin(0, 0);
     const hint = this.add
-      .text(w / 2 - 12, h / 2 - 10, "click a tech to choose · Esc to close", {
+      .text(w / 2 - 12, h / 2 - 10, "1–6 or click a tech · Enter to study · Esc to close", {
         fontFamily: "monospace",
         fontSize: "10px",
         color: "#7f93a6",
@@ -1604,7 +1755,7 @@ export class WorldScene extends Phaser.Scene {
       const def = TECH_TREE[id];
       const sel = id === target;
       const row = this.add
-        .text(left, top + i * 16, `${sel ? "●" : "○"} ${def.name}  (${def.cost} · ${def.era})`, {
+        .text(left, top + i * 16, `${i + 1}. ${sel ? "●" : "○"} ${def.name}  (${def.cost} · ${def.era})`, {
           fontFamily: "monospace",
           fontSize: "11px",
           color: sel ? "#ffe08a" : "#cfe0a8",
