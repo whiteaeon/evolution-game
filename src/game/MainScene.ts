@@ -12,6 +12,7 @@ import {
   ensureHomininTexture,
   type MorphParams,
 } from "./textures.js";
+import { HOMININ_WALK, homininFrameKey } from "./homininWalk.js";
 
 const WORLD_W = 640;
 const WORLD_H = 360;
@@ -296,9 +297,9 @@ export class MainScene extends Phaser.Scene {
 
   private syncTribe(dt: number): void {
     this.walkTimer += dt;
-    if (this.walkTimer > 260) {
+    if (this.walkTimer > 200) {
       this.walkTimer = 0;
-      this.walkPhase ^= 1; // flip the global walk-cycle frame
+      this.walkPhase = (this.walkPhase + 1) & 3; // advance the 4-beat walk cycle
     }
 
     const living = this.ctrl.sim.living;
@@ -320,8 +321,10 @@ export class MainScene extends Phaser.Scene {
         this.tribe.set(ind.id, view);
       }
       view.morph = key;
-      // 2-frame walk; stagger by index so the tribe doesn't step in lockstep.
-      const frameKey = (this.walkPhase + idx) & 1 ? `${key}_1` : key;
+      // 4-beat walk over 3 deduped poses; stagger by index so the tribe doesn't
+      // step in lockstep.
+      const pose = HOMININ_WALK[(this.walkPhase + idx) & 3];
+      const frameKey = homininFrameKey(key, pose);
       if (view.sprite.texture.key !== frameKey) view.sprite.setTexture(frameKey);
 
       const childScale = ind.age < this.ctrl.sim.config.reproMinAge ? 0.55 + (ind.age / 15) * 0.45 : 1;
