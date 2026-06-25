@@ -23,6 +23,7 @@ import {
 import {
   ERAS,
   TECH_TREE,
+  BELIEF_STAGES,
   individualName,
   notableById,
   selectLeader,
@@ -98,6 +99,11 @@ const GATHER_COOLDOWN_MS = 220;
 /** One study session at the totem: spend this much food, gain this much insight. */
 const STUDY_FOOD = 5;
 const STUDY_POINTS = 30;
+/** A ritual at the campfire: an offering of food that deepens the tribe's belief. */
+const RITUAL_FOOD = 6;
+const RITUAL_CULTURE = 14; // belief gained per ritual (mirrors the sim's cultureRitual)
+const RITUAL_RANGE = 48; // how close to a fire you must stand to hold one
+const RITUAL_COOLDOWN_MS = 600; // a brief pause between rituals
 /** Particle tint per resource — woody brown, leafy green, cool grey stone. */
 const RES_COLOR: Record<ResKind, number> = { wood: 0xb5793b, food: 0x6fcf57, stone: 0xc2c6cf };
 /** Floating-gain text colour per resource (a brighter sibling of the particle). */
@@ -226,6 +232,14 @@ export class WorldScene extends Phaser.Scene {
   private resHud!: Phaser.GameObjects.Text;
   private housing = 0;
 
+  // Belief: a ritual at any campfire offers food and accrues the sim's existing
+  // Culture track; a HUD line shows the belief total/stage and a burst marks
+  // each milestone crossed.
+  private ritualKey!: Phaser.Input.Keyboard.Key;
+  private ritualCooldown = 0;
+  private ritualPrompt!: Phaser.GameObjects.Text;
+  private cultureHud!: Phaser.GameObjects.Text;
+
   private npcPhase = 0;
   private npcTimer = 0;
   private objText!: Phaser.GameObjects.Text;
@@ -312,6 +326,7 @@ export class WorldScene extends Phaser.Scene {
       right: [this.key("D"), this.key("RIGHT")],
     };
     this.gatherKey = this.key("SPACE");
+    this.ritualKey = this.key("R");
 
     // One handler does both jobs: a click on a tribe member talks; a click on the
     // ground walks there. `currentlyOver` is every interactive object under the
@@ -591,8 +606,19 @@ export class WorldScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(UI_DEPTH);
 
-    this.leaderHud = this.add
+    this.cultureHud = this.add
       .text(10, 74, "", {
+        fontFamily: "monospace",
+        fontSize: "12px",
+        color: "#d9b3ff",
+        backgroundColor: "#00000066",
+        padding: { x: 6, y: 3 },
+      })
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH);
+
+    this.leaderHud = this.add
+      .text(10, 96, "", {
         fontFamily: "monospace",
         fontSize: "12px",
         color: "#ffe54a",
@@ -615,8 +641,21 @@ export class WorldScene extends Phaser.Scene {
       .setDepth(UI_DEPTH)
       .setVisible(false);
 
+    this.ritualPrompt = this.add
+      .text(0, 0, "", {
+        fontFamily: "monospace",
+        fontSize: "11px",
+        color: "#e8d0ff",
+        backgroundColor: "#000000aa",
+        padding: { x: 4, y: 2 },
+      })
+      .setOrigin(0.5, 1)
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH)
+      .setVisible(false);
+
     this.add
-      .text(VIEW_W / 2, 28, "WASD/click move · click a villager · Space gather · build bar · L quests · T research", {
+      .text(VIEW_W / 2, 28, "WASD/click move · click a villager · Space gather · R ritual · build bar · L quests · T research", {
         fontFamily: "monospace",
         fontSize: "10px",
         color: "#cfe0d0",
@@ -1077,6 +1116,7 @@ export class WorldScene extends Phaser.Scene {
     this.movePlayer(dt);
     this.updateNpcs(dt);
     this.updateGather(dt);
+    this.updateRitual(dt);
     this.updateQuests();
     this.updateInspectMarks();
     this.revealFog();
@@ -1609,6 +1649,84 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
+  // ── belief (rituals at the campfire) ─────────────────────────────────────────
+
+  /** Nearest campfire within range — the hearth a ritual can be held at. */
+  private nearestCampfire(range: number): { x: number; y: number } | null {
+    let best: { x: number; y: number } | null = null;
+    let bestD = range;
+    for (const f of this.campfires) {
+      const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, f.x, f.y);
+      if (d < bestD) {
+        bestD = d;
+        best = f;
+      }
+    }
+    return best;
+  }
+
+  /** Show the ritual prompt by a nearby fire and hold a ritual on R. */
+  private updateRitual(dt: number): void {
+    if (this.ritualCooldown > 0) this.ritualCooldown -= dt;
+    if (this.dialogOpen || this.techPanelOpen || this.inspectOpen || this.buildMode) {
+      this.ritualPrompt.setVisible(false);
+      return;
+    }
+    const fire = this.nearestCampfire(RITUAL_RANGE);
+    if (!fire) {
+      this.ritualPrompt.setVisible(false);
+      return;
+    }
+    const cam = this.cameras.main;
+    const ready = this.ritualCooldown <= 0;
+    this.ritualPrompt
+      .setText(ready ? `R: hold a ritual (−${RITUAL_FOOD} food → belief)` : "…")
+      .setAlpha(ready ? 1 : 0.6)
+      .setPosition(fire.x - cam.scrollX, fire.y - cam.scrollY - 24)
+      .setVisible(true);
+    if (ready && Phaser.Input.Keyboard.JustDown(this.ritualKey)) this.ritual(fire);
+  }
+
+  /** Offer food at the fire to accrue the sim's existing Culture/belief track. */
+  private ritual(fire: { x: number; y: number }): void {
+    const sim = this.ctrl.sim;
+    if (Math.floor(sim.state.resources.food) < RITUAL_FOOD) {
+      this.flash(`Need ${RITUAL_FOOD} food to hold a ritual`);
+      this.buildSfx(false);
+      return;
+    }
+    sim.state.resources.food -= RITUAL_FOOD;
+    const before = sim.state.culture.level();
+    sim.state.culture.accrue(RITUAL_CULTURE);
+    this.ritualCooldown = RITUAL_COOLDOWN_MS;
+
+    this.floatGain(fire.x, fire.y - 14, `+${RITUAL_CULTURE} belief`, "#d9b3ff");
+    this.popParticles(fire.x, fire.y - 8, 0xb98cff);
+    this.buildSfx(true);
+    if (sim.state.culture.level() > before) {
+      this.onBeliefMilestone(sim.state.culture.stage()!, fire);
+    }
+    this.syncHud(); // reflect the new belief total at once
+  }
+
+  /** A belief stage just opened: announce it and burst a bright ring at the fire. */
+  private onBeliefMilestone(stage: (typeof BELIEF_STAGES)[number], fire: { x: number; y: number }): void {
+    this.flash(`The tribe embraces ${stage.name} — ${stage.blurb}`);
+    this.popParticles(fire.x, fire.y - 8, 0xffd9a0);
+    const ring = this.add
+      .circle(fire.x, fire.y - 8, 6, 0xffe6b0, 0)
+      .setStrokeStyle(2, 0xffe6b0, 0.9)
+      .setDepth(FOG_DEPTH - 1);
+    this.tweens.add({
+      targets: ring,
+      scale: 6,
+      alpha: 0,
+      duration: 620,
+      ease: "Quad.easeOut",
+      onComplete: () => ring.destroy(),
+    });
+  }
+
   /** A small radial burst of fading dots at a world point — the gather "pop". */
   private popParticles(x: number, y: number, color: number): void {
     const n = 7;
@@ -1875,6 +1993,14 @@ export class WorldScene extends Phaser.Scene {
         s.knowledge.available().length ? "🔬 research: none — open the Totem (T)" : "🔬 all tech known",
       );
     }
+    const c = s.culture;
+    const stage = c.stage();
+    const next = BELIEF_STAGES[c.level()]; // the next unreached stage, if any
+    let belief = `🔥 Belief ${Math.floor(c.points)}`;
+    if (stage) belief += ` · ${stage.name}`;
+    belief += next ? `  (next: ${next.name} @ ${next.threshold})` : " · zenith";
+    this.cultureHud.setText(belief);
+
     const leader = this.leaderId != null ? this.npcs.find((n) => n.ind.id === this.leaderId) : undefined;
     if (leader) {
       const b = leaderBonus(leader.ind);
