@@ -61,7 +61,7 @@ import { dispositionStyle, neighbourRosterLine } from "../ui/diplomacy.js";
 import { settlementRosterLine } from "../ui/settlements.js";
 import { climateReadout } from "../ui/climate.js";
 import { policyOptions, selectionPressureLabel } from "./policyMenu.js";
-import { CONTROLS, QUEST_MARKER, QUEST_MARKER_LEGEND, BUILD_MARKER, movementLocked } from "./a11y.js";
+import { CONTROLS, QUEST_MARKER, QUEST_MARKER_LEGEND, BUILD_MARKER, BUILD_MARKER_LEGEND, movementLocked } from "./a11y.js";
 import { WorldAudio } from "../ui/audio.js";
 import type { GameController } from "./controller.js";
 
@@ -787,7 +787,10 @@ export class WorldScene extends Phaser.Scene {
     const rowH = 18;
     const legendRowH = 17;
     const controlsH = CONTROLS.length * rowH;
-    const legendH = 20 + QUEST_MARKER_LEGEND.length * legendRowH; // "Map markers" header + rows
+    // The legend documents both the floating quest markers and the build-footprint
+    // affordability glyph, so a colourblind player can read either by glyph + text.
+    const legendEntries = [...QUEST_MARKER_LEGEND, ...BUILD_MARKER_LEGEND];
+    const legendH = 20 + legendEntries.length * legendRowH; // "Map markers" header + rows
     const h = 56 + controlsH + legendH;
     const panel = this.add.rectangle(0, 0, w, h, 0x10140d, 0.96).setStrokeStyle(2, 0xffe08a);
     const title = this.add
@@ -807,8 +810,9 @@ export class WorldScene extends Phaser.Scene {
         lineSpacing: 6,
       })
       .setOrigin(0, 0);
-    // Map-marker legend: explains the floating "!" / "✓" over villagers. Each glyph
-    // keeps its own world colour (colourblind-safe — glyph AND hue) beside its meaning.
+    // Map-marker legend: explains the floating "!" / "✓" over villagers and the
+    // "✓" / "✕" on a build footprint. Each glyph keeps its own world colour
+    // (colourblind-safe — glyph AND hue) beside its meaning.
     const legendTop = -h / 2 + 40 + controlsH + 6;
     const legendTitle = this.add
       .text(-w / 2 + 16, legendTop, "Map markers", {
@@ -819,7 +823,7 @@ export class WorldScene extends Phaser.Scene {
       })
       .setOrigin(0, 0);
     const legend: Phaser.GameObjects.Text[] = [];
-    QUEST_MARKER_LEGEND.forEach((e, i) => {
+    legendEntries.forEach((e, i) => {
       const ry = legendTop + 18 + i * legendRowH;
       legend.push(
         this.add

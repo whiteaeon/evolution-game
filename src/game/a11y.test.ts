@@ -4,6 +4,7 @@ import {
   QUEST_MARKER,
   QUEST_MARKER_LEGEND,
   BUILD_MARKER,
+  BUILD_MARKER_LEGEND,
   movementLocked,
 } from "./a11y.js";
 
@@ -77,6 +78,24 @@ describe("QUEST_MARKER_LEGEND (help overlay explains the markers)", () => {
 
   it("gives every marker a non-empty plain-language meaning", () => {
     for (const e of QUEST_MARKER_LEGEND) {
+      expect(e.meaning.trim().length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("BUILD_MARKER_LEGEND (help overlay explains the build glyph)", () => {
+  it("covers both build-affordability states", () => {
+    expect(BUILD_MARKER_LEGEND.length).toBe(2);
+  });
+
+  it("stays in sync with BUILD_MARKER's glyphs and colours", () => {
+    const styles = BUILD_MARKER_LEGEND.map((e) => `${e.glyph}|${e.color}`);
+    expect(styles).toContain(`${BUILD_MARKER.ok.glyph}|${BUILD_MARKER.ok.color}`);
+    expect(styles).toContain(`${BUILD_MARKER.blocked.glyph}|${BUILD_MARKER.blocked.color}`);
+  });
+
+  it("gives every marker a non-empty plain-language meaning", () => {
+    for (const e of BUILD_MARKER_LEGEND) {
       expect(e.meaning.trim().length).toBeGreaterThan(0);
     }
   });

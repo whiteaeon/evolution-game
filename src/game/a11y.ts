@@ -89,3 +89,15 @@ export const QUEST_MARKER_LEGEND: readonly LegendEntry[] = [
   { ...QUEST_MARKER.available, meaning: "Quest on offer — press E to take it" },
   { ...QUEST_MARKER.ready, meaning: "Quest done — return to turn it in" },
 ];
+
+/**
+ * What the ✓/✕ glyph on a build-placement footprint means. Derived from
+ * {@link BUILD_MARKER} so the legend can never drift from the glyphs/colours the
+ * ghost draws. Without this the help overlay documents the floating quest markers
+ * but never the build-affordability glyph — and that text+glyph pairing is exactly
+ * what a colourblind player leans on instead of the red/green hue.
+ */
+export const BUILD_MARKER_LEGEND: readonly LegendEntry[] = [
+  { ...BUILD_MARKER.ok, meaning: "Build spot affordable — Enter or click to place" },
+  { ...BUILD_MARKER.blocked, meaning: "Build spot too costly — gather more first" },
+];
