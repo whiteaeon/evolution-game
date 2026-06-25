@@ -21,7 +21,7 @@ import { buildRaidSides, resolveRaid } from "./raidDefense.js";
 import { outbreakRisk } from "./epidemicRisk.js";
 import { isPointVisible } from "./cull.js";
 import { particleBudget } from "./particleBudget.js";
-import { acceptCelebrationCount, BURST_STYLE, gatherBurstCount, questCelebrationCount, raidCelebrationCount, rallyBurstCount } from "./feedback.js";
+import { acceptCelebrationCount, BURST_STYLE, gatherBurstCount, questCelebrationCount, questRingScale, raidCelebrationCount, rallyBurstCount } from "./feedback.js";
 import {
   TUTORIAL_STEPS,
   advanceTutorial,
@@ -1222,6 +1222,27 @@ export class WorldScene extends Phaser.Scene {
     const gy = (giver ? giver.y : this.player.y) - 20;
     this.floatGain(gx, gy, `+${q.reward.amount} ${q.reward.res}`, RES_TEXT[q.reward.res]);
     this.popParticles(gx, gy, BURST_STYLE.quest.color, questCelebrationCount(q.reward.amount));
+    // The climactic payoff earns the milestone ring: a bright cyan ring blooms at
+    // the giver, swelling with the size of the reward (see questRingScale).
+    this.burstRing(gx, gy, BURST_STYLE.quest.color, questRingScale(q.reward.amount));
+  }
+
+  /** A bright ring that blooms and fades from a point — the celebratory flourish
+   *  a quest turn-in earns to mark the game's main reward moment. */
+  private burstRing(x: number, y: number, color: number, scale: number): void {
+    if (!this.onScreen(x, y)) return;
+    const ring = this.add
+      .circle(x, y, 6, color, 0)
+      .setStrokeStyle(2, color, 0.9)
+      .setDepth(FOG_DEPTH - 1);
+    this.tweens.add({
+      targets: ring,
+      scale,
+      alpha: 0,
+      duration: 620,
+      ease: "Quad.easeOut",
+      onComplete: () => ring.destroy(),
+    });
   }
 
   private closeDialog(): void {
