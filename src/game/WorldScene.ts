@@ -31,6 +31,7 @@ import { isPointVisible } from "./cull.js";
 import { npcOnScreen } from "./npcCull.js";
 import { shouldScanFog } from "./fogScan.js";
 import { particleBudget } from "./particleBudget.js";
+import { flashEvictCount } from "./flashCap.js";
 import { footstepDust } from "./footstepDust.js";
 import { nightGlowAlpha } from "./nightGlow.js";
 import { isBlocked, removeSolid, type Solid } from "./solids.js";
@@ -215,6 +216,10 @@ const PARTICLE_CULL_MARGIN = 48;
  *  (rapid gathering, a flurry of building placements) can't pile up unbounded
  *  sprites + tweens. Roomy enough that normal play never trims a burst. */
 const MAX_PARTICLES = 90;
+/** Hard ceiling on simultaneously-alive flash notices, so an event burst (a
+ *  birth, a loss and an outbreak in one beat, or a flurry of build placements)
+ *  can't pile up unbounded overlapping text + tweens at the same screen spot. */
+const MAX_FLASHES = 3;
 
 /** Placeable structures, each with a cost and a perk it grants. */
 interface BuildType {
@@ -376,6 +381,7 @@ export class WorldScene extends Phaser.Scene {
   private gatherKey!: Phaser.Input.Keyboard.Key;
   private gatherCooldown = 0;
   private activeParticles = 0; // live decorative dots, capped by MAX_PARTICLES
+  private flashes: Phaser.GameObjects.Text[] = []; // live flash notices, capped by MAX_FLASHES
   private gatherTarget: Gatherable | null = null; // sticky aimed node, highlighted for the player
   private gatherHiliteTime = 0; // ms into the aim highlight's breathing pulse; resets on re-aim
   private gatherSwingTime = GATHER_SWING_MS; // ms into the body's harvest-strike lean; starts spent (upright)
@@ -1586,6 +1592,7 @@ export class WorldScene extends Phaser.Scene {
     // load — left high, it permanently shrinks every future burst's budget
     // (particleBudget starves once active ≥ cap). Reset it to a clean slate.
     this.activeParticles = 0;
+    this.flashes = []; // restart destroys the live notices; drop the dangling refs
   }
 
   private toggleBuild(id: string, keyboard = false): void {
@@ -1794,6 +1801,10 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private flash(msg: string): void {
+    // Retire the oldest notices first so a burst of events can't pile up
+    // unbounded overlapping text + tweens at the same screen spot.
+    const evict = flashEvictCount(this.flashes.length, MAX_FLASHES);
+    for (let i = 0; i < evict; i++) this.flashes.shift()?.destroy();
     const txt = this.add
       .text(VIEW_W / 2, 64, msg, {
         fontFamily: "monospace",
@@ -1805,13 +1816,18 @@ export class WorldScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setScrollFactor(0)
       .setDepth(UI_DEPTH + 5);
+    this.flashes.push(txt);
     this.tweens.add({
       targets: txt,
       y: 44,
       alpha: 0,
       duration: 1300,
       ease: "Sine.easeOut",
-      onComplete: () => txt.destroy(),
+      onComplete: () => {
+        const i = this.flashes.indexOf(txt);
+        if (i >= 0) this.flashes.splice(i, 1);
+        txt.destroy();
+      },
     });
   }
 
