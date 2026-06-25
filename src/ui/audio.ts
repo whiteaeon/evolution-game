@@ -422,6 +422,18 @@ export class WorldAudio {
   }
 
   /**
+   * A soft, sustained warm swell as a ritual is held at the hearth — a low root
+   * and a consonant fifth blooming together into a gentle "hum of belief".
+   * Distinct from {@link build}'s hard square placement thunk (which the ritual
+   * used to borrow): a ritual is a spiritual moment, not a structure thudding
+   * down, so it sounds rounded and sustained rather than percussive.
+   */
+  ritual(): void {
+    this.tone({ freq: 294, dur: 0.5, gain: 0.04, type: "sine" }); // D4 — warm root
+    this.tone({ freq: 440, dur: 0.6, gain: 0.035, type: "triangle", delay: 0.08 }); // A4 — fifth above
+  }
+
+  /**
    * A short rising horn-call as a villager is mustered to the hearth's defence.
    * Distinct from {@link build}'s downward placement thunk (which the rally used
    * to borrow) and from {@link raidWarn}'s low ominous warning: this is a bright,

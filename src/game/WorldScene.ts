@@ -2875,7 +2875,7 @@ export class WorldScene extends Phaser.Scene {
 
     this.floatGain(fire.x, fire.y - 14, `+${RITUAL_CULTURE} belief`, "#d9b3ff");
     this.popParticles(fire.x, fire.y - 8, 0xb98cff);
-    this.audio.build(true);
+    this.audio.ritual(); // a warm sustained swell — a spiritual moment, not a build thunk
     if (sim.state.culture.level() > before) {
       this.onBeliefMilestone(sim.state.culture.stage()!, fire);
     }
