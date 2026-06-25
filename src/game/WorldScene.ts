@@ -39,7 +39,7 @@ import {
   type TechId,
 } from "../sim/index.js";
 import { dispositionStyle } from "../ui/diplomacy.js";
-import { CONTROLS, QUEST_MARKER } from "./a11y.js";
+import { CONTROLS, QUEST_MARKER, BUILD_MARKER } from "./a11y.js";
 import { WorldAudio } from "../ui/audio.js";
 import type { GameController } from "./controller.js";
 
@@ -270,6 +270,7 @@ export class WorldScene extends Phaser.Scene {
   private buildMode: BuildType | null = null;
   private ghost!: Phaser.GameObjects.Image;
   private ghostTile!: Phaser.GameObjects.Rectangle; // snapped footprint under the ghost
+  private ghostMark!: Phaser.GameObjects.Text; // colourblind-safe ✓/✕ affordability glyph
   private buildBtns: { type: BuildType; bg: Phaser.GameObjects.Rectangle }[] = [];
   // When build mode is entered from the keyboard (digit keys), the ghost tracks
   // the chieftain so it can be placed without a mouse; moving the mouse hands
@@ -421,6 +422,13 @@ export class WorldScene extends Phaser.Scene {
       .image(0, 0, "fire-0")
       .setOrigin(0.5, 0.85)
       .setAlpha(0.55)
+      .setDepth(FOG_DEPTH - 1)
+      .setVisible(false);
+    // A ✓/✕ glyph over the footprint so affordability never relies on the
+    // red/green tint alone (the most common colourblindness).
+    this.ghostMark = this.add
+      .text(0, 0, "", { fontFamily: "monospace", fontSize: "18px", fontStyle: "bold" })
+      .setOrigin(0.5)
       .setDepth(FOG_DEPTH - 1)
       .setVisible(false);
 
@@ -1314,6 +1322,7 @@ export class WorldScene extends Phaser.Scene {
     this.buildAimKeyboard = keyboard;
     this.ghost.setTexture(t.icon).setVisible(true);
     this.ghostTile.setVisible(true);
+    this.ghostMark.setVisible(true);
     this.highlightBuildBtns();
     if (keyboard) this.updateBuildAim(); // snap the ghost to the chieftain at once
   }
@@ -1322,6 +1331,7 @@ export class WorldScene extends Phaser.Scene {
     this.buildMode = null;
     this.ghost.setVisible(false);
     this.ghostTile.setVisible(false);
+    this.ghostMark.setVisible(false);
     this.highlightBuildBtns();
   }
 
@@ -1360,6 +1370,9 @@ export class WorldScene extends Phaser.Scene {
     const col = ok ? 0x66ff66 : 0xff5a5a;
     this.ghost.setTint(col).setAlpha(ok ? 0.75 : 0.5);
     this.ghostTile.setFillStyle(col, 0.22).setStrokeStyle(1.5, col, 0.9);
+    // Redundant glyph so the affordability read survives red/green colourblindness.
+    const mark = BUILD_MARKER[ok ? "ok" : "blocked"];
+    this.ghostMark.setPosition(wx, wy).setText(mark.glyph).setColor(mark.color);
   }
 
   private tryPlace(wx: number, wy: number): void {

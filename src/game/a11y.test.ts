@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { CONTROLS, QUEST_MARKER } from "./a11y.js";
+import { CONTROLS, QUEST_MARKER, BUILD_MARKER } from "./a11y.js";
 
 describe("CONTROLS help listing", () => {
   it("documents every core keyboard-only action", () => {
@@ -36,6 +36,20 @@ describe("QUEST_MARKER colourblind safety", () => {
 
   it("uses non-empty glyphs and valid hex colours", () => {
     for (const m of Object.values(QUEST_MARKER)) {
+      expect(m.glyph.length).toBeGreaterThan(0);
+      expect(m.color).toMatch(/^#[0-9a-f]{6}$/i);
+    }
+  });
+});
+
+describe("BUILD_MARKER colourblind safety", () => {
+  it("distinguishes affordable vs blocked by BOTH glyph and colour", () => {
+    expect(BUILD_MARKER.ok.glyph).not.toBe(BUILD_MARKER.blocked.glyph);
+    expect(BUILD_MARKER.ok.color).not.toBe(BUILD_MARKER.blocked.color);
+  });
+
+  it("uses non-empty glyphs and valid hex colours", () => {
+    for (const m of Object.values(BUILD_MARKER)) {
       expect(m.glyph.length).toBeGreaterThan(0);
       expect(m.color).toMatch(/^#[0-9a-f]{6}$/i);
     }
