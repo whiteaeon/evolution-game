@@ -20,6 +20,12 @@ describe("CONTROLS help listing", () => {
     expect(keys).toMatch(/\?/); // help itself
   });
 
+  it("binds keyboard-only inspection of leaders/notables to I", () => {
+    const inspect = CONTROLS.find((c) => /inspect/i.test(c.action));
+    expect(inspect).toBeDefined();
+    expect(inspect!.keys).toMatch(/\bi\b/i);
+  });
+
   it("has no blank rows", () => {
     for (const c of CONTROLS) {
       expect(c.keys.trim().length).toBeGreaterThan(0);
