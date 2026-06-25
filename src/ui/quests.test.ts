@@ -40,6 +40,17 @@ describe("questLogHTML", () => {
     expect(html).toContain('class="quest active"');
   });
 
+  it("exposes each progress bar to assistive tech via ARIA", () => {
+    const entries = initQuests();
+    evaluateQuests(entries, { ...baseCtx, population: 15 });
+    const html = questLogHTML(entries, QUEST_DEFS);
+    // reach30: an accessible progressbar reporting 15 of 30.
+    expect(html).toContain('role="progressbar"');
+    expect(html).toContain('aria-valuemin="0"');
+    expect(html).toContain('aria-valuemax="30"');
+    expect(html).toContain('aria-valuenow="15"');
+  });
+
   it("marks completed and failed quests distinctly", () => {
     const entries = initQuests();
     // Complete the population quest, fail the fire deadline.
