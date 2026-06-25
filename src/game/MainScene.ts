@@ -13,12 +13,15 @@ import {
   type MorphParams,
 } from "./textures.js";
 import { HOMININ_WALK, homininFrameKey } from "./homininWalk.js";
+import { BURST_STYLE, burstForEvent, type FeedbackKind } from "./feedback.js";
 
 const WORLD_W = 640;
 const WORLD_H = 360;
 const CAMP = { x: 322, y: 196 };
 const CLEARING_R = 96;
 const MAX_SPRITES = 40;
+/** Hard ceiling on live feedback particles, so bursts can never pile up. */
+const MAX_BURST_PARTICLES = 96;
 
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
@@ -77,6 +80,16 @@ interface TribeView {
   morph: string;
 }
 
+/** One short-lived bit of event juice: drifts, fades, then retires. */
+interface BurstParticle {
+  obj: Phaser.GameObjects.Rectangle;
+  vx: number;
+  vy: number;
+  rise: number;
+  life: number; // ms remaining
+  ttl: number; // ms total, for the alpha fade
+}
+
 export class MainScene extends Phaser.Scene {
   private ctrl!: GameController;
   private rng = new RNG(99);
@@ -94,6 +107,11 @@ export class MainScene extends Phaser.Scene {
   private ambienceLayer!: Phaser.GameObjects.Container;
   private ambience: AmbientParticle[] = [];
   private ambienceKind: AmbienceKind = "none";
+
+  private burstLayer!: Phaser.GameObjects.Container;
+  private bursts: BurstParticle[] = [];
+  private lastBirths = -1;
+  private lastDeaths = -1;
 
   private tribe = new Map<number, TribeView>();
   private spritePool: Phaser.GameObjects.Image[] = [];
@@ -133,6 +151,7 @@ export class MainScene extends Phaser.Scene {
     this.snowLayer = this.add.container(0, 0).setDepth(900);
     this.coldOverlay = this.add.rectangle(0, 0, WORLD_W, WORLD_H, 0xbcd6ff, 0).setOrigin(0, 0).setDepth(950);
     this.nightOverlay = this.add.rectangle(0, 0, WORLD_W, WORLD_H, 0x0b1437, 0).setOrigin(0, 0).setDepth(960);
+    this.burstLayer = this.add.container(0, 0).setDepth(1990); // above the world, under floating text
     this.buildSnow();
 
     this.rebuildWorld(this.ctrl.sim.state.biome);
@@ -222,7 +241,9 @@ export class MainScene extends Phaser.Scene {
     this.syncFood(s.resources.food);
     this.syncTribe(dt);
     this.syncWeather(s.world.cold, dt);
+    this.syncVitals();
     this.syncEvents();
+    this.updateBursts(dt);
   }
 
   private syncShelter(shelter: string): void {
@@ -413,6 +434,61 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
+  /** Burst on new births and deaths, derived from the sim's running totals. */
+  private syncVitals(): void {
+    const t = this.ctrl.sim.state.totals;
+    if (this.lastBirths >= 0 && t.births > this.lastBirths) {
+      this.spawnBurst("birth", CAMP.x + (Math.random() - 0.5) * 70, CAMP.y + 8);
+    }
+    if (this.lastDeaths >= 0 && t.deaths > this.lastDeaths) {
+      this.spawnBurst("death", CAMP.x + (Math.random() - 0.5) * 70, CAMP.y + 8);
+    }
+    this.lastBirths = t.births;
+    this.lastDeaths = t.deaths;
+  }
+
+  /** Emit a small particle burst for a celebrated moment, honouring the cap. */
+  private spawnBurst(kind: FeedbackKind, x: number, y: number): void {
+    const style = BURST_STYLE[kind];
+    const room = MAX_BURST_PARTICLES - this.bursts.length;
+    if (room <= 0) return;
+    const n = Math.min(style.count, room);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const spd = 0.4 + Math.random() * 1.2;
+      const size = Math.random() < 0.4 ? 3 : 2;
+      const obj = this.add.rectangle(x, y, size, size, style.color, 1).setOrigin(0.5);
+      this.burstLayer.add(obj);
+      this.bursts.push({
+        obj,
+        vx: Math.cos(a) * spd,
+        vy: Math.sin(a) * spd - 0.5, // slight upward bias on launch
+        rise: style.rise,
+        life: 850,
+        ttl: 850,
+      });
+    }
+  }
+
+  /** Drift, fade and retire the active burst particles. */
+  private updateBursts(dt: number): void {
+    if (!this.bursts.length) return;
+    const f = dt * 0.06;
+    for (let i = this.bursts.length - 1; i >= 0; i--) {
+      const p = this.bursts[i];
+      p.life -= dt;
+      if (p.life <= 0) {
+        p.obj.destroy();
+        this.bursts.splice(i, 1);
+        continue;
+      }
+      p.vy += 0.05 * f; // gentle gravity
+      p.obj.x += p.vx * f;
+      p.obj.y += (p.vy + p.rise) * f;
+      p.obj.setAlpha(p.life / p.ttl);
+    }
+  }
+
   private syncEvents(): void {
     const log = this.ctrl.sim.state.log;
     if (log.length <= this.lastLogLen) {
@@ -421,6 +497,8 @@ export class MainScene extends Phaser.Scene {
     }
     const ev = log[log.length - 1];
     this.lastLogLen = log.length;
+    const kind = burstForEvent(ev.type, ev.message);
+    if (kind) this.spawnBurst(kind, CAMP.x, CAMP.y - 8);
     const tint =
       ev.type === "bounty" || ev.type === "discovery" || ev.type === "milestone"
         ? "#ffe08a"
