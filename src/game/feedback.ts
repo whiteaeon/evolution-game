@@ -38,6 +38,18 @@ export function questCelebrationCount(rewardAmount: number): number {
 }
 
 /**
+ * How many particles a *quest accept* earns: a subdued sibling of the turn-in
+ * burst. Accepting a task is a promise, not a payoff, so it pops smaller and is
+ * capped lower than {@link questCelebrationCount} — for any given reward the
+ * completion always out-celebrates the acceptance. It still swells a touch with
+ * the reward so a fat bounty feels worth taking on.
+ */
+export function acceptCelebrationCount(rewardAmount: number): number {
+  const bonus = Math.max(0, Math.floor(rewardAmount / 8));
+  return Math.min(8, 4 + bonus);
+}
+
+/**
  * How many particles a resolved raid throws at the hearth. A victory swells with
  * the size of the band that held the line — every villager the player rallied
  * adds a particle — so a hard-won defence pops bigger, directly rewarding the

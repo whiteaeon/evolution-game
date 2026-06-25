@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  acceptCelebrationCount,
   burstForEvent,
   BURST_STYLE,
   questCelebrationCount,
@@ -47,6 +48,17 @@ describe("event feedback routing", () => {
     expect(raidCelebrationCount(true, 4)).toBeGreaterThan(solo); // a bigger band pops bigger
     expect(raidCelebrationCount(true, 2)).toBe(solo + 1); // one rallied villager → +1 particle
     expect(raidCelebrationCount(true, 50)).toBeLessThanOrEqual(14); // never floods the scene
+  });
+
+  it("makes accepting a quest a subdued promise that the payoff out-celebrates", () => {
+    expect(acceptCelebrationCount(0)).toBe(4); // baseline puff, no reward bonus
+    expect(acceptCelebrationCount(16)).toBe(6); // floor(16/8) bonus
+    expect(acceptCelebrationCount(24)).toBeGreaterThan(acceptCelebrationCount(8)); // a fatter bounty is worth more
+    expect(acceptCelebrationCount(1000)).toBeLessThanOrEqual(8); // never floods the scene
+    // The promise is always smaller than the payoff for the same reward.
+    for (const reward of [0, 8, 12, 40, 1000]) {
+      expect(acceptCelebrationCount(reward)).toBeLessThan(questCelebrationCount(reward));
+    }
   });
 
   it("makes a breach a small, subdued puff regardless of band size", () => {
