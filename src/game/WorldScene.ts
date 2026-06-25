@@ -62,7 +62,7 @@ import { beliefEffectLabel } from "../ui/belief.js";
 import { settlementRosterLine } from "../ui/settlements.js";
 import { climateReadout } from "../ui/climate.js";
 import { policyOptions, selectionPressureLabel } from "./policyMenu.js";
-import { CONTROLS, QUEST_MARKER, QUEST_MARKER_LEGEND, BUILD_MARKER, BUILD_MARKER_LEGEND, movementLocked } from "./a11y.js";
+import { CONTROLS, QUEST_MARKER, QUEST_MARKER_LEGEND, BUILD_MARKER, BUILD_MARKER_LEGEND, INSPECT_MARKER_LEGEND, movementLocked } from "./a11y.js";
 import { WorldAudio } from "../ui/audio.js";
 import type { GameController } from "./controller.js";
 
@@ -788,9 +788,10 @@ export class WorldScene extends Phaser.Scene {
     const rowH = 18;
     const legendRowH = 17;
     const controlsH = CONTROLS.length * rowH;
-    // The legend documents both the floating quest markers and the build-footprint
-    // affordability glyph, so a colourblind player can read either by glyph + text.
-    const legendEntries = [...QUEST_MARKER_LEGEND, ...BUILD_MARKER_LEGEND];
+    // The legend documents the floating quest markers, the build-footprint
+    // affordability glyph, and the leader/notable inspect markers, so a colourblind
+    // player can read each by glyph + text rather than hue alone.
+    const legendEntries = [...QUEST_MARKER_LEGEND, ...BUILD_MARKER_LEGEND, ...INSPECT_MARKER_LEGEND];
     const legendH = 20 + legendEntries.length * legendRowH; // "Map markers" header + rows
     const h = 56 + controlsH + legendH;
     const panel = this.add.rectangle(0, 0, w, h, 0x10140d, 0.96).setStrokeStyle(2, 0xffe08a);

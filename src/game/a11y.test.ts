@@ -5,6 +5,8 @@ import {
   QUEST_MARKER_LEGEND,
   BUILD_MARKER,
   BUILD_MARKER_LEGEND,
+  INSPECT_MARKER,
+  INSPECT_MARKER_LEGEND,
   movementLocked,
 } from "./a11y.js";
 
@@ -111,6 +113,39 @@ describe("BUILD_MARKER colourblind safety", () => {
     for (const m of Object.values(BUILD_MARKER)) {
       expect(m.glyph.length).toBeGreaterThan(0);
       expect(m.color).toMatch(/^#[0-9a-f]{6}$/i);
+    }
+  });
+});
+
+describe("INSPECT_MARKER colourblind safety", () => {
+  it("distinguishes leader vs notable by BOTH glyph and colour", () => {
+    expect(INSPECT_MARKER.leader.glyph).not.toBe(INSPECT_MARKER.notable.glyph);
+    expect(INSPECT_MARKER.leader.color).not.toBe(INSPECT_MARKER.notable.color);
+  });
+
+  it("uses non-empty glyphs and valid hex colours", () => {
+    for (const m of Object.values(INSPECT_MARKER)) {
+      expect(m.glyph.length).toBeGreaterThan(0);
+      expect(m.color).toMatch(/^#[0-9a-f]{6}$/i);
+    }
+  });
+});
+
+describe("INSPECT_MARKER_LEGEND (help overlay explains the 👑/✦ markers)", () => {
+  it("covers both inspect-marker states", () => {
+    expect(INSPECT_MARKER_LEGEND.length).toBe(2);
+  });
+
+  it("stays in sync with INSPECT_MARKER's glyphs and colours", () => {
+    const styles = INSPECT_MARKER_LEGEND.map((e) => `${e.glyph}|${e.color}`);
+    expect(styles).toContain(`${INSPECT_MARKER.leader.glyph}|${INSPECT_MARKER.leader.color}`);
+    expect(styles).toContain(`${INSPECT_MARKER.notable.glyph}|${INSPECT_MARKER.notable.color}`);
+  });
+
+  it("tells the keyboard-only player that I inspects each marker", () => {
+    for (const e of INSPECT_MARKER_LEGEND) {
+      expect(e.meaning.trim().length).toBeGreaterThan(0);
+      expect(e.meaning).toMatch(/\bI\b/); // the inspect key, so no mouse is required
     }
   });
 });
