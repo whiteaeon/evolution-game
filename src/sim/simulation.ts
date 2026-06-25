@@ -89,6 +89,12 @@ const BALANCE = {
   stonePerBuilder: 0.5,
   hidePerHunter: 0.35,
   coldLethality: 0.24,
+  // Seasonal swing: how hard winter bites and summer rewards. Both are amplitudes
+  // around the yearly mean (the mean cold/abundance is unchanged), so deepening
+  // them sharpens scarcity-vs-growth windows without shifting overall balance.
+  // Winter (season 0) is coldest + leanest; summer (season 0.5) warmest + richest.
+  seasonColdSwing: 0.24, // ± added to ambient cold across the year (was 0.18)
+  seasonAbundanceSwing: 0.28, // ± on the food multiplier, anti-phased with cold (was 0.2, sin-phased)
   starveLethality: 0.18,
   diseaseLethality: 0.2,
   predatorLethality: 0.18,
@@ -715,11 +721,30 @@ export class Simulation {
     const b = this.biome();
     w.seasonIndex = this.state.tick % 4;
     w.season = w.seasonIndex / 4;
-    const seasonal = Math.cos(w.season * Math.PI * 2) * 0.18;
-    w.cold = clamp01(this.config.baseCold + b.coldAdd + seasonal);
-    w.abundance =
-      (0.9 + Math.sin(w.season * Math.PI * 2) * 0.2 + e.abundance + (this.config.abundanceBonus ?? 0)) *
+    const { cold, abundance } = this.seasonalConditions(b, w.season, e);
+    w.cold = cold;
+    w.abundance = abundance;
+  }
+
+  /**
+   * Seasonal cold + food multiplier for a biome at a given seasonal phase. The
+   * phase term is +1 at winter (season 0) and -1 at summer (season 0.5): cold
+   * rises with it, abundance falls against it, so winter is the joint coldest +
+   * leanest point and summer the warmest + richest. Swing magnitudes are BALANCE
+   * tunables and symmetric about the yearly mean, so deepening them never shifts
+   * the average — only the gap between scarcity and growth windows.
+   */
+  private seasonalConditions(
+    b: BiomeProfile,
+    season: number,
+    e: Required<TechEffects>,
+  ): { cold: number; abundance: number } {
+    const phase = Math.cos(season * Math.PI * 2);
+    const cold = clamp01(this.config.baseCold + b.coldAdd + phase * BALANCE.seasonColdSwing);
+    const abundance =
+      (0.9 - phase * BALANCE.seasonAbundanceSwing + e.abundance + (this.config.abundanceBonus ?? 0)) *
       b.abundance;
+    return { cold, abundance };
   }
 
   private workers: Record<Task, Individual[]> = {} as Record<Task, Individual[]>;
@@ -1638,13 +1663,8 @@ export class Simulation {
     const k = s.knowledge;
     const b = BIOME_PROFILE[st.biome];
     // Local biome conditions: same season as home, but this settlement's biome —
-    // mirrors updateWorld's formula so cold/abundance pressures are truly local.
-    const season = s.world.season;
-    const seasonal = Math.cos(season * Math.PI * 2) * 0.18;
-    const cold = clamp01(this.config.baseCold + b.coldAdd + seasonal);
-    const abundance =
-      (0.9 + Math.sin(season * Math.PI * 2) * 0.2 + e.abundance + (this.config.abundanceBonus ?? 0)) *
-      b.abundance;
+    // shares updateWorld's seasonal formula so cold/abundance pressures are truly local.
+    const { cold, abundance } = this.seasonalConditions(b, s.world.season, e);
 
     const alive = st.members.filter((m) => m.alive);
     const workers = this.distributeForSettlement(alive, st.allocation);
