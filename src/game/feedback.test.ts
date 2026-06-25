@@ -12,6 +12,7 @@ import {
   QUEST_RING_SCALE_BASE,
   raidCelebrationCount,
   rallyBurstCount,
+  studyFloatText,
   type FeedbackKind,
 } from "./feedback.js";
 
@@ -99,6 +100,11 @@ describe("event feedback routing", () => {
     expect(dustBurstCount(15)).toBeGreaterThan(dustBurstCount(5)); // a pricier build kicks more dust
     expect(dustBurstCount(0)).toBe(DUST_BURST_BASE); // a free build → baseline, never below it
     expect(dustBurstCount(1000)).toBeLessThanOrEqual(16); // never floods the scene
+  });
+
+  it("formats the study confirmation as a spend→insight note", () => {
+    expect(studyFloatText(5, 30)).toBe("−5 food → +30 insight");
+    expect(studyFloatText(8, 50)).toBe("−8 food → +50 insight");
   });
 
   it("makes a breach a small, subdued puff regardless of band size", () => {

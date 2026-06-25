@@ -23,7 +23,7 @@ import { outbreakRisk } from "./epidemicRisk.js";
 import { isPointVisible } from "./cull.js";
 import { particleBudget } from "./particleBudget.js";
 import { removeSolid, type Solid } from "./solids.js";
-import { acceptCelebrationCount, BURST_STYLE, dustBurstCount, gatherBurstCount, questCelebrationCount, questRingScale, raidCelebrationCount, rallyBurstCount } from "./feedback.js";
+import { acceptCelebrationCount, BURST_STYLE, dustBurstCount, gatherBurstCount, questCelebrationCount, questRingScale, raidCelebrationCount, rallyBurstCount, studyFloatText } from "./feedback.js";
 import {
   TUTORIAL_STEPS,
   advanceTutorial,
@@ -2470,6 +2470,15 @@ export class WorldScene extends Phaser.Scene {
     sim.state.resources.food -= STUDY_FOOD;
     const completed = sim.fundResearch(STUDY_POINTS);
     this.audio.build(true);
+    // Confirm the spend→insight bargain with a floating note off the Study
+    // button — research is the one resource transaction behind a full-screen
+    // panel, so it earns a screen-space float (a world floatGain would hide).
+    this.floatScreen(
+      this.studyBtn.x + 70,
+      this.studyBtn.y - 6,
+      studyFloatText(STUDY_FOOD, STUDY_POINTS),
+      "#bfe0ff",
+    );
     if (completed) this.onTechDiscovered(completed);
     this.refreshTechPanel();
   }
@@ -3044,6 +3053,31 @@ export class WorldScene extends Phaser.Scene {
       })
       .setOrigin(0.5, 1)
       .setDepth(FOG_DEPTH - 1);
+    this.tweens.add({
+      targets: t,
+      y: y - 26,
+      alpha: 0,
+      duration: 760,
+      ease: "Sine.easeOut",
+      onComplete: () => t.destroy(),
+    });
+  }
+
+  /** A floating gain anchored to the HUD/panel layer (screen space), for moments
+   *  a world-space {@link floatGain} would be hidden behind a full-screen panel. */
+  private floatScreen(x: number, y: number, msg: string, color: string): void {
+    const t = this.add
+      .text(x, y, msg, {
+        fontFamily: "monospace",
+        fontSize: "12px",
+        color,
+        fontStyle: "bold",
+        stroke: "#000000",
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5, 1)
+      .setScrollFactor(0)
+      .setDepth(UI_DEPTH + 3);
     this.tweens.add({
       targets: t,
       y: y - 26,
