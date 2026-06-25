@@ -64,6 +64,78 @@ import {
   type WorldState,
 } from "./types.js";
 
+/**
+ * Current save-format version. Bump when the serialized shape changes and add a
+ * matching step in {@link migrateSave} so older saves keep loading.
+ */
+export const SAVE_VERSION = 2;
+
+/** The raw object {@link Simulation.serialize} writes / {@link Simulation.load} reads. */
+interface RawSave {
+  /** Format version. Older saves used `v`; the very first ones had neither. */
+  version?: number;
+  v?: number;
+  config?: Partial<SimConfig>;
+  rng: number;
+  rivalRng?: number;
+  settlementRng?: number;
+  epidemicRng?: number;
+  nextId?: number;
+  allocation?: TaskAllocation;
+  // Migrated field-by-field, so older saves may be missing newer keys.
+  state: Record<string, any>;
+}
+
+/**
+ * Bring an older save up to {@link SAVE_VERSION}, filling any field a newer system
+ * added with a sensible default so prior-version saves still load. Idempotent for
+ * current saves (every field already present), so a round-trip stays byte-identical
+ * and deterministic resume is preserved.
+ */
+function migrateSave(data: RawSave): RawSave {
+  const from = data.version ?? data.v ?? 1;
+  if (from < 2) upgradeToV2(data);
+  data.version = SAVE_VERSION;
+  return data;
+}
+
+/** v1 → v2: default the quest, rival, scouting, raw-resource and tally fields. */
+function upgradeToV2(data: RawSave): void {
+  const s = data.state;
+  if (!s) return;
+  // Raw gathered resources (wood/stone/hide) and the build/material pools were
+  // added after the first saves; default any missing pool to empty.
+  const fillPools = (r: Record<string, any> | undefined): void => {
+    if (!r) return;
+    r.materials ??= 0;
+    r.buildProgress ??= 0;
+    r.wood ??= 0;
+    r.stone ??= 0;
+    r.hide ??= 0;
+  };
+  fillPools(s.resources);
+  if (Array.isArray(s.settlements)) for (const st of s.settlements) fillPools(st?.resources);
+  // AI rival tribes, region fog-of-war and scouting.
+  if (!Array.isArray(s.rivals)) s.rivals = [];
+  if (!Array.isArray(s.discoveredRegions)) s.discoveredRegions = s.region ? [s.region] : [];
+  if (typeof s.scouts !== "number") s.scouts = 0;
+  if (typeof s.scoutProgress !== "number") s.scoutProgress = 0;
+  // Objective quests.
+  if (!Array.isArray(s.quests)) s.quests = initQuests();
+  if (typeof s.goal !== "string") s.goal = "";
+  // Lifetime tallies gained fields over time; default any that are missing.
+  const t = (s.totals ??= {}) as Record<string, any>;
+  t.births ??= 0;
+  t.deaths ??= 0;
+  t.interbred ??= 0;
+  t.migrations ??= 0;
+  t.peakPopulation ??= Array.isArray(s.individuals) ? s.individuals.length : 0;
+  t.winterChainsSurvived ??= 0;
+  t.lineagesInterbred ??= [];
+  t.biomesVisited ??= s.biome ? [s.biome] : [];
+  t.eventChainsSeen ??= [];
+}
+
 export const DEFAULT_CONFIG: SimConfig = {
   seed: 1,
   startingPopulation: 10,
@@ -1186,7 +1258,7 @@ export class Simulation {
         : st,
     );
     return JSON.stringify({
-      v: 1,
+      version: SAVE_VERSION,
       config: this.config,
       rng: this.rng.getState(),
       rivalRng: this.rivalRng.getState(),
@@ -1200,25 +1272,21 @@ export class Simulation {
 
   /** Rebuild a Simulation from {@link serialize}. Resumes the RNG identically. */
   static load(json: string): Simulation {
-    const data = JSON.parse(json);
+    const data = migrateSave(JSON.parse(json));
     const sim = new Simulation(data.config);
     sim.rng.setState(data.rng);
     if (typeof data.rivalRng === "number") sim.rivalRng.setState(data.rivalRng);
     if (typeof data.settlementRng === "number") sim.settlementRng.setState(data.settlementRng);
     if (typeof data.epidemicRng === "number") sim.epidemicRng.setState(data.epidemicRng);
-    sim.nextId = data.nextId;
-    sim.allocation = data.allocation;
+    sim.nextId = data.nextId ?? sim.nextId;
+    sim.allocation = data.allocation ?? sim.allocation;
     sim.state = {
-      ...data.state,
+      ...(data.state as unknown as SimState),
       knowledge: Knowledge.deserialize(data.state.knowledge),
       culture: Culture.deserialize(data.state.culture),
       policies: Policies.deserialize(data.state.policies),
     };
-    if (!sim.state.rivals) sim.state.rivals = [];
-    if (!sim.state.discoveredRegions) sim.state.discoveredRegions = [sim.state.region];
-    if (typeof sim.state.scouts !== "number") sim.state.scouts = 0;
-    if (typeof sim.state.scoutProgress !== "number") sim.state.scoutProgress = 0;
-    sim.state.settlements = sim.rebuildSettlements((data.state as { settlements?: Settlement[] }).settlements);
+    sim.state.settlements = sim.rebuildSettlements(data.state.settlements as Settlement[] | undefined);
     return sim;
   }
 
