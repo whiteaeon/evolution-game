@@ -60,6 +60,7 @@ describe("WorldAudio", () => {
       a.build(false);
       a.questAccept();
       a.questComplete();
+      a.rally();
       a.raidWarn();
       a.raidResolve(true);
       a.raidResolve(false);
