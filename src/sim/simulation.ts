@@ -5,6 +5,7 @@ import { Knowledge, TECH_TREE, TECH_ORDER, eraCapstone } from "./knowledge.js";
 import {
   BIOME_PROFILE,
   DEFAULT_REGION,
+  REGIONS,
   regionById,
   regionDistance,
   type BiomeProfile,
@@ -98,6 +99,11 @@ const BALANCE = {
   migrateFoodPerHead: 1.6, // food spent per person per unit distance travelled
   migrateRisk: 0.5, // base per-person death chance over a full-map journey
   foodStoragePerCapacity: 9, // soft cap: max stored food = carryingCapacity * this (bounds hoarding)
+  // Scouting: idle hands sent out to chart the fogged regions of the world map.
+  scoutBase: 0.05, // exploration progress per idle scout per tick toward the next region
+  scoutCacheChance: 0.55, // chance a newly charted region yields a raw-resource cache (else a foraging find)
+  scoutCacheAmount: 14, // base raw-resource units in a scouting cache (scaled by the region's biome)
+  scoutEventFood: 12, // food a foraging party brings back when a charted region holds no cache
   eventChainInterval: 37, // ticks between possible choice-driven event chains
   // Diplomacy: periodic encounters with a rival that trade food for relations.
   diplomacyInterval: 43, // ticks between possible diplomacy events
@@ -292,6 +298,12 @@ export interface SimState {
   researchTarget: TechId | null;
   pendingEncounter: Encounter | null;
   pendingChoice: PendingChoice | null;
+  /** Region fog-of-war: ids of regions the tribe has charted. The rest stay hidden. */
+  discoveredRegions: string[];
+  /** People sent to scout the map, drawn from the tribe's idle (unassigned) labour. */
+  scouts: number;
+  /** Exploration progress in [0,1) the scouting party has made toward the next region. */
+  scoutProgress: number;
   /** AI neighbour tribes sharing the region map (pure sim; no diplomacy yet). */
   rivals: RivalTribe[];
   /** Lifetime tallies for the chronicle / stats / achievement screens. */
@@ -370,6 +382,9 @@ export class Simulation {
       researchTarget: knowledge.available()[0] ?? null,
       pendingEncounter: null,
       pendingChoice: null,
+      discoveredRegions: [region.id],
+      scouts: 0,
+      scoutProgress: 0,
       rivals: createRivals(this.rivalRng, region.id),
       totals: {
         births: 0,
@@ -425,6 +440,11 @@ export class Simulation {
 
   setResearchTarget(tech: TechId | null): void {
     this.state.researchTarget = tech;
+  }
+
+  /** Dedicate up to `count` of the tribe's idle labour to scouting the map. */
+  setScouts(count: number): void {
+    this.state.scouts = Math.max(0, Math.floor(count));
   }
 
   /** What it would cost to migrate to a region right now (for the UI). */
@@ -544,6 +564,7 @@ export class Simulation {
     this.updateWorld(effects);
     this.distributeWorkers();
     this.produce(effects);
+    this.advanceScouting();
     this.consumeAndUpdateNeeds(effects);
     const popBeforeDeaths = this.living.length;
     this.ageAndDie(effects);
@@ -697,6 +718,72 @@ export class Simulation {
     if (avail.length === 0) return null;
     for (const t of TECH_ORDER) if (avail.includes(t)) return t;
     return avail[0];
+  }
+
+  /**
+   * Scouting: idle hands chart the fogged regions of the map. Progress toward the
+   * nearest undiscovered region accrues with the number of scouts (capped at the
+   * tribe's spare labour). When a region is charted it surfaces an outcome — a raw
+   * resource cache or a small foraging find. With no scouts (or nothing left to
+   * find) this is a no-op that never touches the RNG, so it cannot perturb any
+   * existing run, replay or balance.
+   */
+  private advanceScouting(): void {
+    const s = this.state;
+    const target = this.nearestUndiscoveredRegion();
+    if (!target) return; // the whole map is already charted
+    const scouts = Math.min(s.scouts, this.workers.idle.length);
+    if (scouts <= 0) return;
+    s.scoutProgress += scouts * BALANCE.scoutBase;
+    if (s.scoutProgress >= 1) {
+      s.scoutProgress = 0;
+      this.revealRegion(target);
+    }
+  }
+
+  /** The closest region the tribe has not yet charted, or null once all are known. */
+  private nearestUndiscoveredRegion(): string | null {
+    const s = this.state;
+    let best: string | null = null;
+    let bestDist = Infinity;
+    for (const r of REGIONS) {
+      if (s.discoveredRegions.includes(r.id)) continue;
+      const d = regionDistance(s.region, r.id);
+      if (d < bestDist) {
+        bestDist = d;
+        best = r.id;
+      }
+    }
+    return best;
+  }
+
+  /** Chart a region and surface its outcome: a raw-resource cache or a foraging find. */
+  private revealRegion(id: string): void {
+    const s = this.state;
+    s.discoveredRegions.push(id);
+    const region = regionById(id);
+    if (this.rng.chance(BALANCE.scoutCacheChance)) {
+      // A cache: raw goods the scouts haul back, flavoured by the region's biome.
+      const prof = BIOME_PROFILE[region.biome];
+      const wood = Math.round(BALANCE.scoutCacheAmount * prof.wood);
+      const stone = Math.round(BALANCE.scoutCacheAmount * prof.stone);
+      const hide = Math.round(BALANCE.scoutCacheAmount * prof.hide);
+      s.resources.wood += wood;
+      s.resources.stone += stone;
+      s.resources.hide += hide;
+      this.logEvent(
+        "discovery",
+        `Scouts chart ${region.name} (${region.biome}) and haul back a cache: +${wood} wood, +${stone} stone, +${hide} hide.`,
+      );
+    } else {
+      // A small event: no cache, but the foraging party returns with food.
+      const food = Math.round(BALANCE.scoutEventFood * s.world.abundance);
+      s.resources.food += food;
+      this.logEvent(
+        "discovery",
+        `Scouts chart ${region.name} (${region.biome}); a foraging party returns with +${food} food.`,
+      );
+    }
   }
 
   private consumeAndUpdateNeeds(e: Required<TechEffects>): void {
@@ -1410,6 +1497,9 @@ export class Simulation {
     sim.allocation = data.allocation;
     sim.state = { ...data.state, knowledge: Knowledge.deserialize(data.state.knowledge) };
     if (!sim.state.rivals) sim.state.rivals = [];
+    if (!sim.state.discoveredRegions) sim.state.discoveredRegions = [sim.state.region];
+    if (typeof sim.state.scouts !== "number") sim.state.scouts = 0;
+    if (typeof sim.state.scoutProgress !== "number") sim.state.scoutProgress = 0;
     return sim;
   }
 }
