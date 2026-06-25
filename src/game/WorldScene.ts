@@ -18,6 +18,7 @@ import { buildDialogue, type DialogNode } from "./dialogue.js";
 import { buildRaidSides, resolveRaid } from "./raidDefense.js";
 import { outbreakRisk } from "./epidemicRisk.js";
 import { isPointVisible } from "./cull.js";
+import { particleBudget } from "./particleBudget.js";
 import { acceptCelebrationCount, BURST_STYLE, questCelebrationCount, raidCelebrationCount } from "./feedback.js";
 import {
   TUTORIAL_STEPS,
@@ -158,6 +159,10 @@ const RES_COLOR: Record<ResKind, number> = { wood: 0xb5793b, food: 0x6fcf57, sto
 const RES_TEXT: Record<ResKind, string> = { wood: "#e0a060", food: "#9fe070", stone: "#d6dae6" };
 /** Slack around the camera before a decorative burst is culled as off-screen. */
 const PARTICLE_CULL_MARGIN = 48;
+/** Hard ceiling on simultaneously-alive decorative dots, so overlapping bursts
+ *  (rapid gathering, a flurry of building placements) can't pile up unbounded
+ *  sprites + tweens. Roomy enough that normal play never trims a burst. */
+const MAX_PARTICLES = 90;
 
 /** Placeable structures, each with a cost and a perk it grants. */
 interface BuildType {
@@ -312,6 +317,7 @@ export class WorldScene extends Phaser.Scene {
   private placed: { kind: "campfire" | "hut"; x: number; y: number }[] = [];
   private gatherKey!: Phaser.Input.Keyboard.Key;
   private gatherCooldown = 0;
+  private activeParticles = 0; // live decorative dots, capped by MAX_PARTICLES
   private gatherTarget: Gatherable | null = null; // sticky aimed node, highlighted for the player
   // Diegetic audio: synthesized SFX + a biome/time-of-day ambient bed, silent
   // until a user gesture resumes it and behind the mute toggle (see ../ui/audio).
@@ -1538,13 +1544,14 @@ export class WorldScene extends Phaser.Scene {
   /** A low, ground-hugging puff of dust where a structure lands. */
   private dustBurst(x: number, y: number): void {
     if (!this.onScreen(x, y)) return;
-    const n = 12;
+    const n = particleBudget(this.activeParticles, 12, MAX_PARTICLES);
     for (let i = 0; i < n; i++) {
       const a = (Math.PI * 2 * i) / n + Math.random() * 0.5;
       const dist = 14 + Math.random() * 20;
       const dot = this.add
         .circle(x, y, Phaser.Math.Between(2, 4), 0xcbb892, 0.9)
         .setDepth(FOG_DEPTH - 2);
+      this.activeParticles++;
       this.tweens.add({
         targets: dot,
         x: x + Math.cos(a) * dist,
@@ -1553,7 +1560,10 @@ export class WorldScene extends Phaser.Scene {
         scale: 0.3,
         duration: 380 + Math.random() * 180,
         ease: "Quad.easeOut",
-        onComplete: () => dot.destroy(),
+        onComplete: () => {
+          this.activeParticles--;
+          dot.destroy();
+        },
       });
     }
   }
@@ -2805,13 +2815,14 @@ export class WorldScene extends Phaser.Scene {
   /** A small radial burst of fading dots at a world point — the gather "pop". */
   private popParticles(x: number, y: number, color: number, count = 7): void {
     if (!this.onScreen(x, y)) return;
-    const n = count;
+    const n = particleBudget(this.activeParticles, count, MAX_PARTICLES);
     for (let i = 0; i < n; i++) {
       const a = (Math.PI * 2 * i) / n + Math.random() * 0.6;
       const dist = 10 + Math.random() * 14;
       const dot = this.add
         .circle(x, y, Phaser.Math.Between(2, 3), color)
         .setDepth(FOG_DEPTH - 2);
+      this.activeParticles++;
       this.tweens.add({
         targets: dot,
         x: x + Math.cos(a) * dist,
@@ -2820,7 +2831,10 @@ export class WorldScene extends Phaser.Scene {
         scale: 0.3,
         duration: 340 + Math.random() * 140,
         ease: "Quad.easeOut",
-        onComplete: () => dot.destroy(),
+        onComplete: () => {
+          this.activeParticles--;
+          dot.destroy();
+        },
       });
     }
   }
