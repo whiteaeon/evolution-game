@@ -75,6 +75,9 @@ const TRAIT_EPITHET: Record<TraitName, string> = {
   speech: "the Eloquent",
 };
 
+/** Human-readable trait name, e.g. "coldTolerance" → "Cold Tolerance". */
+const traitLabel = (t: TraitName): string => cap(t.replace(/([A-Z])/g, " $1"));
+
 /** parentId → direct children ids. */
 function childMap(individuals: Individual[]): Map<number, number[]> {
   const m = new Map<number, number[]>();
@@ -159,7 +162,7 @@ export function notableIndividuals(individuals: Individual[]): Notable[] {
       id: champ.id,
       kind: "trait-exemplar",
       title: TRAIT_EPITHET[t],
-      detail: `${t} ${champ.genome[t].toFixed(2)}`,
+      detail: `${traitLabel(t)} ${champ.genome[t].toFixed(2)}`,
     });
   }
 
