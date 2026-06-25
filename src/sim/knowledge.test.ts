@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { Knowledge } from "./knowledge.js";
+import { Knowledge, TECH_ORDER } from "./knowledge.js";
+import { pickResearchTarget } from "./production.js";
 import { Simulation } from "./simulation.js";
 
 describe("knowledge / culture", () => {
@@ -40,6 +41,24 @@ describe("knowledge / culture", () => {
     const done = k.addProgress("stoneTools", 40);
     expect(done).toBe("stoneTools");
     expect(k.has("stoneTools")).toBe(true);
+  });
+
+  it("picks the earliest researchable tech (== available()[0]) as it discovers more", () => {
+    const sim = new Simulation({ seed: 3 });
+    const k = sim.state.knowledge;
+    // Across many discovery states, the picked target must equal the earliest
+    // unlocked tech in TECH_ORDER — i.e. available()[0] — which is exactly what
+    // the optimized pickResearchTarget short-circuits to.
+    const earliestUnlocked = () => TECH_ORDER.find((t) => k.isUnlocked(t)) ?? null;
+    for (let i = 0; i < TECH_ORDER.length; i++) {
+      expect(pickResearchTarget(sim.state)).toBe(earliestUnlocked());
+      expect(pickResearchTarget(sim.state)).toBe(k.available()[0] ?? null);
+      const next = earliestUnlocked();
+      if (!next) break;
+      k.discovered.add(next);
+    }
+    // Everything discovered → nothing left to research.
+    expect(pickResearchTarget(sim.state)).toBeNull();
   });
 
   it("persists across the death of every individual who discovered it", () => {
