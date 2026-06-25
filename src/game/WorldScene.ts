@@ -28,6 +28,7 @@ import { outbreakRisk } from "./epidemicRisk.js";
 import { isPointVisible } from "./cull.js";
 import { npcOnScreen } from "./npcCull.js";
 import { particleBudget } from "./particleBudget.js";
+import { footstepDust } from "./footstepDust.js";
 import { nightGlowAlpha } from "./nightGlow.js";
 import { removeSolid, type Solid } from "./solids.js";
 import { acceptCelebrationCount, BURST_STYLE, dustBurstCount, gatherBurstCount, questCelebrationCount, questRingScale, raidCelebrationCount, rallyBurstCount, studyFloatText } from "./feedback.js";
@@ -1740,6 +1741,28 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
+  /** A single faint puff kicked up under a planted foot while walking. */
+  private footDust(x: number, y: number, alpha: number): void {
+    if (!this.onScreen(x, y)) return;
+    if (particleBudget(this.activeParticles, 1, MAX_PARTICLES) < 1) return; // yield to richer effects
+    const dot = this.add
+      .circle(x, y, Phaser.Math.Between(2, 3), 0xcbb892, alpha)
+      .setDepth(FOG_DEPTH - 2);
+    this.activeParticles++;
+    this.tweens.add({
+      targets: dot,
+      y: y - 4, // drifts up off the ground a touch as it thins out
+      alpha: 0,
+      scale: 0.4,
+      duration: 360,
+      ease: "Quad.easeOut",
+      onComplete: () => {
+        this.activeParticles--;
+        dot.destroy();
+      },
+    });
+  }
+
   private flash(msg: string): void {
     const txt = this.add
       .text(VIEW_W / 2, 64, msg, {
@@ -3322,6 +3345,10 @@ export class WorldScene extends Phaser.Scene {
       if (stepIdx !== this.lastStepIdx) {
         this.lastStepIdx = stepIdx;
         this.audio.footstep();
+        // Kick a faint puff of dust under the planted foot, stronger the brisker
+        // the stride — so movement leaves a visible mark, not just a sound.
+        const puff = footstepDust(stepIdx, speed, PLAYER_SPEED);
+        if (puff.emit) this.footDust(this.player.x + puff.offsetX, this.player.y, puff.alpha);
       }
     } else {
       this.vx = 0;
