@@ -149,6 +149,20 @@ export function buildSpendText(amount: number, res: string): string {
 }
 
 /**
+ * The note that floats at the camp when a raid breaks through and plunders food,
+ * or null when nothing was taken (a clean defence). Every other resource change
+ * pops an in-world floatGain at its site — a gather's "+N wood", a build's
+ * {@link buildSpendText} debit, a quest's reward — but a raid breach only ever
+ * flashed its loss in the banner. This closes that loop at the hearth, reusing
+ * the same "−" debit glyph so a food loss reads consistently with a build spend.
+ * A won or bloodless raid takes nothing, so it earns no float (returns null).
+ */
+export function raidPlunderText(plunder: number): string | null {
+  if (plunder <= 0) return null;
+  return buildSpendText(plunder, "food");
+}
+
+/**
  * Route a logged sim event to the burst it deserves, or null when it earns no
  * extra juice. Births and deaths are not log events — the scene derives those
  * from the `totals` counters — so they are not handled here.

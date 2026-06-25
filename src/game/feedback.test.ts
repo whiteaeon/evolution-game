@@ -14,6 +14,7 @@ import {
   rallyBurstCount,
   studyFloatText,
   buildSpendText,
+  raidPlunderText,
   type FeedbackKind,
 } from "./feedback.js";
 
@@ -112,6 +113,13 @@ describe("event feedback routing", () => {
     expect(buildSpendText(20, "wood")).toBe("−20 wood");
     expect(buildSpendText(15, "stone")).toBe("−15 stone");
     expect(buildSpendText(20, "wood").startsWith("−")).toBe(true); // same minus as studyFloatText
+  });
+
+  it("floats a plundered-food loss as a debit, but nothing on a clean defence", () => {
+    expect(raidPlunderText(6)).toBe("−6 food");
+    expect(raidPlunderText(6)).toBe(buildSpendText(6, "food")); // shares the build-spend glyph
+    expect(raidPlunderText(0)).toBeNull(); // a held camp loses nothing
+    expect(raidPlunderText(-3)).toBeNull();
   });
 
   it("makes a breach a small, subdued puff regardless of band size", () => {
